@@ -96,7 +96,9 @@ and `VCMP_FANARTTV_API_KEY` (docs/development.md, "Integration keys").
 
 ## What is missing
 
-Nothing - the spec is implemented in full.
+- **Focus after the first start.** The spec has the focus return to the page when
+  the wizard closes at the first start. Nothing moves it there, so it goes nowhere
+  in particular. Space and the media keys still work through the window hook.
 
 ## Known problems
 
@@ -108,9 +110,9 @@ Nothing - the spec is implemented in full.
   listed, the folder rows above it are reached with Shift+Tab.
 - **Empty card on tall windows.** The card stays 640 px tall on every step, so
   Welcome and Done leave much of it empty.
-- **Focus after the first start.** When the wizard closes at the first start, the
-  focus goes nowhere in particular. Space and the media keys still work through
-  the window hook.
+- **Untested wiring.** "No wizard without a database", and the update check
+  released when the wizard closes, rest on `main.rs`'s wiring alone. The tests
+  cover `setup::first_start` and `connect_held`, not `main`.
 - **Failed library view.** If the database opens but the library view fails to
   load, the wizard doesn't open and the flag isn't written, so it appears on a
   later start that works.
