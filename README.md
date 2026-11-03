@@ -40,7 +40,7 @@ A player for the music files on your own drives, for Windows 10 and newer and Li
 
 ## Download
 
-Get VCMP from [ShitHub Releases](https://github.com/dalibor-osu/vcmp/releases).
+Get VCMP from [GitHub Releases](https://github.com/dalibor-osu/vcmp/releases).
 There is no installer yet: unpack the archive and run VCMP from where it is.
 
 | System | File | Then |
@@ -66,7 +66,7 @@ Run anyway.
 
 A version is the date of its release: 26.10.0 is the first release of October 2026,
 26.10.1 a fix later that month and 26.11.0 the release in November. Releases marked
-as pre-releases on ShitHub are for trying out, and VCMP's update check doesn't
+as pre-releases on GitHub are for trying out, and VCMP's update check doesn't
 offer them.
 
 ## AI agents
