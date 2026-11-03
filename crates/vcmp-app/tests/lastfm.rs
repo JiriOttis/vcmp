@@ -118,8 +118,12 @@ fn start(with_key: bool, prepare: impl FnOnce(&Library)) -> App {
     let library = Rc::new(library);
 
     let window = vcmp_app::create_window().unwrap();
-    // Shown, so the Settings page is laid out and its controls exist.
+    // Shown, so the Settings page is laid out and its controls exist. Tall enough for
+    // the Last.fm row: the finder skips what is scrolled out of view.
     window.show().unwrap();
+    window
+        .window()
+        .set_size(slint::LogicalSize::new(1100.0, 1600.0));
     let worker = Worker::default();
     let opened = Rc::new(RefCell::new(Vec::new()));
     let browser_works = Rc::new(RefCell::new(true));

@@ -147,8 +147,7 @@ fn the_zoom_scales_the_window_and_is_restored() {
 fn the_system_setting_is_not_saved_as_a_choice() {
     i_slint_backend_testing::init_no_event_loop();
     let dir = tempfile::tempdir().unwrap();
-    let window = vcmp_app::create_window().unwrap();
-    window.show().unwrap();
+    let window = settings_window();
     preferences::connect(&window, Rc::new(open_library(&dir))).unwrap();
     window.global::<Theme>().set_system_reduces_motion(true);
     click(&window, AccessibleRole::Tab, "Settings");

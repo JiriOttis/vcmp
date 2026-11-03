@@ -56,6 +56,14 @@ There are no downloads for other systems, such as macOS. VCMP can probably be bu
 and run on them, but you have to do that yourself (see
 [Build it yourself](#build-it-yourself)), and nobody tests it there.
 
+### The first start
+
+The first time VCMP opens, a short setup asks for your music folders, the theme,
+zoom and motion, and what VCMP may send online. Showing what you play on Discord
+and the update check are on unless you turn them off there. Every choice is in
+Settings too, and "Run setup again" at the top of Settings opens the setup again.
+Libraries that already have music folders don't see it after an update.
+
 ### The first start on Windows
 
 VCMP isn't code-signed yet, so Windows can't tell who made it and says "Windows

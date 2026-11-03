@@ -13,7 +13,7 @@ use vcmp_app::library_view::LibraryView;
 use vcmp_app::navigation::History;
 use vcmp_app::player_service::{PlayerService, Presence, SETTING_OUTPUT_DEVICE};
 use vcmp_app::tag_editor::TagEditor;
-use vcmp_app::updates;
+use vcmp_app::{Setup, updates};
 use vcmp_integrations::discord::{self, DiscordPresence};
 use vcmp_integrations::fanart::PhotoPicker;
 use vcmp_integrations::lastfm::Credentials;
@@ -38,8 +38,14 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         Ok((library, paths)) => {
             let library = Rc::new(library);
+            let mut first_start = false;
             match LibraryView::connect(&window, library.clone()) {
                 Ok(view) => {
+                    first_start = vcmp_app::setup::connect(
+                        &window,
+                        &library,
+                        vcmp_app::setup::skip_requested(),
+                    );
                     // Only builds made with VCMP's Last.fm API key have Last.fm.
                     let lastfm = vcmp_app::lastfm_service::start(
                         &window,
@@ -183,7 +189,19 @@ fn main() -> Result<(), slint::PlatformError> {
                     window.set_library_failed(true);
                 }
             }
-            updates::connect(&window, Some(library.clone()), updates::check_online);
+            // On the first start the wizard asks about the check before it runs.
+            let update_check = updates::connect_held(
+                &window,
+                Some(library.clone()),
+                first_start,
+                updates::check_online,
+            );
+            let weak = window.as_weak();
+            window.global::<Setup>().on_closed(move || {
+                if let Some(window) = weak.upgrade() {
+                    update_check.release(&window);
+                }
+            });
             if let Err(error) = vcmp_app::preferences::connect(&window, library) {
                 log::warn!("could not load preferences: {error}");
             }

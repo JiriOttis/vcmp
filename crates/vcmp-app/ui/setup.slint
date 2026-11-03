@@ -1,0 +1,324 @@
+import { Theme } from "theme.slint";
+import { Button, Modal, ScrollArea } from "components.slint";
+import { LibraryState } from "library-state.slint";
+import { LibrarySection } from "library-settings.slint";
+import { LastfmRow } from "lastfm-settings.slint";
+import { LastfmState } from "lastfm-state.slint";
+import { PlayerState } from "player-state.slint";
+import { DiscordRow, MotionRow, ThemeRow, ZoomRow } from "setting-rows.slint";
+import { UpdateCheckRow } from "updates.slint";
+import { PhotoKeyRow, PhotoSearch } from "photo-picker.slint";
+import { AgentState, AgentsSwitchRow } from "agents.slint";
+import { Confirmation } from "confirmation.slint";
+
+// The first-run setup wizard (src/setup.rs decides when it opens at the start).
+// Every control is Settings' own, so a choice applies and saves at once and leaving
+// early keeps it.
+export global Setup {
+    // The wizard is shown, on this step: 0 Welcome, 1 Music folders, 2 Look,
+    // 3 Online services, 4 Done.
+    out property <bool> open;
+    out property <int> step;
+    out property <int> last-step: 4;
+    // It closed, finished or skipped.
+    callback closed();
+
+    // At the first start and from Settings: always from the welcome.
+    public function start() {
+        self.step = 0;
+        self.open = true;
+    }
+
+    public function go-to(step: int) {
+        self.step = max(0, min(self.last-step, step));
+    }
+
+    public function close() {
+        if self.open {
+            self.open = false;
+            self.closed();
+        }
+    }
+}
+
+// A step's heading and the sentences under it.
+component StepIntro inherits VerticalLayout {
+    in property <string> title;
+    in property <string> text;
+
+    spacing: Theme.space-s;
+
+    Text {
+        text: root.title;
+        color: Theme.colors.text;
+        font-size: Theme.font-title;
+        font-weight: Theme.weight-strong;
+        wrap: word-wrap;
+        min-height: self.preferred-height;
+    }
+    Text {
+        text: root.text;
+        color: Theme.colors.text-muted;
+        font-size: Theme.font-body;
+        wrap: word-wrap;
+        min-height: self.preferred-height;
+    }
+}
+
+component Paragraph inherits Text {
+    color: Theme.colors.text;
+    font-size: Theme.font-body;
+    wrap: word-wrap;
+    min-height: self.preferred-height;
+}
+
+// The steps scroll inside the card, the buttons stay below them. The focus starts on
+// Next, and each step hands it to its first control as it opens. Skip setup and
+// Escape ask first (`Confirmation`); on Done, Close and Escape just close.
+export component SetupWizard inherits Modal {
+    private property <bool> done: Setup.step == Setup.last-step;
+    // Tab went past the last control, or Shift+Tab before the first.
+    private property <int> wrap-first;
+    private property <int> wrap-last;
+    // The dialog shows this wizard's question.
+    private property <bool> asked;
+    private property <int> answers: Confirmation.answers;
+
+    function leave() {
+        if root.done {
+            Setup.close();
+        } else {
+            root.asked = true;
+            Confirmation.ask(@tr("Close the setup?"), @tr("What you have set so far stays. Run setup again, at the top of Settings, opens it again."), @tr("Close setup"), @tr("Close the setup"), @tr("Continue the setup"));
+        }
+    }
+
+    function go-to(step: int) {
+        Setup.go-to(step);
+        scroll.content-y = 0;
+    }
+
+    changed answers => {
+        if root.asked {
+            root.asked = false;
+            if Confirmation.accepted {
+                Setup.close();
+            } else {
+                next-button.focus();
+            }
+        }
+    }
+
+    label: @tr("Set up VCMP");
+    card-width: Theme.dialog-width;
+    tall: true;
+    tall-limit: Theme.dialog-setup-height;
+    init => {
+        next-button.focus();
+    }
+    escape => {
+        root.leave();
+    }
+    focus-first => {
+        root.wrap-first += 1;
+    }
+    focus-last => {
+        root.wrap-last += 1;
+    }
+
+    scroll := ScrollArea {
+        vertical-stretch: 1;
+        preferred-height: body.preferred-height;
+
+        body := VerticalLayout {
+            padding: Theme.space-xl;
+            padding-bottom: Theme.space-s;
+            spacing: Theme.space-l;
+            alignment: start;
+
+            Text {
+                text: @tr("Step {0} of {1}", Setup.step + 1, Setup.last-step + 1);
+                color: Theme.colors.text-muted;
+                font-size: Theme.font-small;
+            }
+
+            if Setup.step == 0: VerticalLayout {
+                property <int> wrap: root.wrap-first;
+                changed wrap => {
+                    next-button.focus();
+                }
+                init => {
+                    next-button.focus();
+                }
+                spacing: Theme.space-l;
+
+                StepIntro {
+                    title: @tr("Welcome to VCMP");
+                    text: @tr("VCMP plays the music files on your own drives. It sorts them into albums and artists by their tags, and notices new, changed and moved files by itself.");
+                }
+                Paragraph {
+                    text: @tr("The next steps add your music folders, choose how VCMP looks, and decide what it may send online. Each choice applies at once, and all of them are in Settings later.");
+                }
+            }
+
+            if Setup.step == 1: VerticalLayout {
+                spacing: Theme.space-l;
+
+                StepIntro {
+                    title: @tr("Music folders");
+                    text: @tr("The scan starts as soon as you add a folder and runs behind this dialog, so you can go on while it reads your files.");
+                }
+                LibrarySection {
+                    property <int> wrap: root.wrap-first;
+                    changed wrap => {
+                        self.focus();
+                    }
+                    init => {
+                        self.focus();
+                    }
+                    heading: false;
+                }
+            }
+
+            if Setup.step == 2: VerticalLayout {
+                spacing: Theme.space-xs;
+
+                StepIntro {
+                    title: @tr("Look");
+                    padding-bottom: Theme.space-m;
+                    text: @tr("Changes show behind this dialog as you make them.");
+                }
+                ThemeRow {
+                    property <int> wrap: root.wrap-first;
+                    changed wrap => {
+                        self.focus();
+                    }
+                    init => {
+                        self.focus();
+                    }
+                }
+                ZoomRow { }
+                MotionRow { }
+            }
+
+            if Setup.step == 3: VerticalLayout {
+                spacing: Theme.space-xs;
+
+                StepIntro {
+                    title: @tr("Online services");
+                    padding-bottom: Theme.space-m;
+                    text: PlayerState.discord-available ? @tr("What VCMP may share or look up online, and where it goes. Show on Discord is on from the start; turn it off here if you'd rather not show what you play.")
+                        : @tr("What VCMP may share or look up online, and where it goes.");
+                }
+                if PlayerState.discord-available: DiscordRow {
+                    property <int> wrap: root.wrap-first;
+                    changed wrap => {
+                        self.focus();
+                    }
+                    init => {
+                        self.focus();
+                    }
+                }
+                if LastfmState.available: LastfmRow { }
+                UpdateCheckRow {
+                    property <int> wrap: root.wrap-first;
+                    changed wrap => {
+                        if !PlayerState.discord-available {
+                            self.focus();
+                        }
+                    }
+                    init => {
+                        if !PlayerState.discord-available {
+                            self.focus();
+                        }
+                    }
+                }
+                if PhotoSearch.available: PhotoKeyRow { }
+                AgentsSwitchRow { }
+                if AgentState.enabled: Text {
+                    text: @tr("To connect an agent, open Settings: the token and the setup commands are under AI agents.");
+                    color: Theme.colors.text-muted;
+                    font-size: Theme.font-small;
+                    wrap: word-wrap;
+                    min-height: self.preferred-height;
+                }
+            }
+
+            if root.done: VerticalLayout {
+                property <int> wrap: root.wrap-first;
+                changed wrap => {
+                    back-button.focus();
+                }
+                init => {
+                    next-button.focus();
+                }
+                spacing: Theme.space-l;
+
+                StepIntro {
+                    title: @tr("All set");
+                    text: LibraryState.folders.length == 0 ? @tr("There are no music folders yet. Add one from the Albums page or from Settings, and VCMP finds your albums.")
+                        : LibraryState.scanning ? @tr("VCMP is still reading your music. Albums appear on the Albums page as it finds them.")
+                        : @tr("{n} track is in your library." | "{n} tracks are in your library." % LibraryState.track-count);
+                }
+                Paragraph {
+                    text: @tr("Everything you set here is in Settings, with more besides. Run setup again, at the top of Settings, opens this again.");
+                }
+            }
+        }
+    }
+
+    // A line over the buttons while the step scrolls.
+    Rectangle {
+        height: 1px;
+        visible: scroll.content-height > scroll.visible-height;
+        background: Theme.colors.surface;
+    }
+
+    HorizontalLayout {
+        padding: Theme.space-xl;
+        padding-top: Theme.space-l;
+        spacing: Theme.space-m;
+
+        back-button := Button {
+            text: @tr("Back");
+            label: @tr("Back to the previous step");
+            enabled: Setup.step > 0;
+            clicked => {
+                root.go-to(Setup.step - 1);
+            }
+        }
+        next-button := Button {
+            property <int> last: root.wrap-last;
+            changed last => {
+                if root.done {
+                    self.focus();
+                }
+            }
+            text: root.done ? @tr("Close") : @tr("Next");
+            label: root.done ? @tr("Close the setup") : @tr("Next step");
+            primary: true;
+            clicked => {
+                if root.done {
+                    Setup.close();
+                } else {
+                    root.go-to(Setup.step + 1);
+                }
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+
+        if !root.done: Button {
+            property <int> last: root.wrap-last;
+            changed last => {
+                self.focus();
+            }
+            text: @tr("Skip setup");
+            clicked => {
+                root.leave();
+            }
+        }
+    }
+}

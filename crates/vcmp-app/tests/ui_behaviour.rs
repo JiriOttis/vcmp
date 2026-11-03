@@ -84,7 +84,7 @@ fn clicking_navigation_switches_pages() {
 fn clicking_settings_controls_changes_them() {
     let window = open_window();
     // Tall enough that the Appearance section clears the player bar without scrolling.
-    window.window().set_size(LogicalSize::new(1100.0, 900.0));
+    window.window().set_size(LogicalSize::new(1100.0, 1000.0));
     let theme = window.global::<Theme>();
     open_page(&window, "Settings");
 
@@ -124,10 +124,11 @@ fn everything_works_from_the_keyboard() {
     press(&window, Key::Return);
     assert_eq!(window.get_current_page(), Page::Settings);
 
-    // From the Settings entry: About, Add folder, Update automatically, the shuffle
-    // choice, the output device, then the theme choice. Without folders there is no
-    // Rescan button, and without a player service no Discord switch.
-    for _ in 0..6 {
+    // From the Settings entry: About, Run setup again, Add folder, Update
+    // automatically, the shuffle choice, the output device, then the theme choice.
+    // Without folders there is no Rescan button, and without a player service no
+    // Discord switch.
+    for _ in 0..7 {
         press(&window, Key::Tab);
     }
     press(&window, Key::RightArrow);
@@ -161,6 +162,8 @@ fn everything_works_from_the_keyboard() {
 #[test]
 fn theme_choice_selects_the_palette() {
     let window = open_window();
+    // Tall enough for the Appearance section: the finder skips what is out of view.
+    window.window().set_size(LogicalSize::new(1100.0, 1000.0));
     let theme = window.global::<Theme>();
     open_page(&window, "Settings");
 

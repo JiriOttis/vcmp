@@ -18,6 +18,14 @@ cargo run -p vcmp-app
 A release build is `cargo build --release -p vcmp-app`, and the program lands in
 `target/release/`.
 
+A library with no music folders opens the setup wizard on its first start
+([ui.md](ui.md#setup-wizard)). `VCMP_SETUP=skip` leaves it closed and writes
+nothing, so a fresh `VCMP_HOME` started without the variable still shows it:
+
+```bash
+VCMP_HOME=target/try VCMP_SETUP=skip cargo run -p vcmp-app
+```
+
 On Windows the build needs Visual Studio's "Desktop development with C++" (the MSVC
 linker and the Windows SDK). Every Windows executable carries VCMP's manifest
 (`crates/vcmp-app/windows/`), which `build.rs` compiles with `embed-resource`:

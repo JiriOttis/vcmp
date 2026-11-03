@@ -55,7 +55,9 @@ cargo run -p vcmp-app
 `VCMP_HOME=<dir>` makes the app use `<dir>/library.sqlite3` and `<dir>/cache/`
 instead of the platform data and cache directories. For example,
 `VCMP_HOME=target/scan-example cargo run -p vcmp-app` opens the library that
-`cargo run --example scan` built.
+`cargo run --example scan` built. A fresh `VCMP_HOME` with no music folders opens
+the setup wizard once; `VCMP_SETUP=skip` leaves it closed without recording that it
+was seen. Tests and examples never open it unless they ask for it.
 
 `cargo run -p vcmp-app -- mcp` runs the stdio relay for MCP clients instead of the
 window: it relays standard input and output to a VCMP running with the same

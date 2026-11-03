@@ -1,0 +1,90 @@
+import { ReduceMotion, Theme, ThemeMode } from "theme.slint";
+import { IconButton, SegmentedChoice, SettingRow, Toggle } from "components.slint";
+import { Glyph } from "icons.slint";
+import { PlayerState } from "player-state.slint";
+
+// Rows that Settings and the setup wizard both show, bound to the same state, so a
+// change in either applies and saves at once.
+
+export component DiscordRow inherits SettingRow {
+    title: @tr("Show on Discord");
+    description: @tr("While Discord runs, your status shows the track you're listening to and its album cover. For albums without a MusicBrainz ID, the cover is looked up on musicbrainz.org, which receives the album title and artist.");
+    forward-focus: toggle;
+
+    toggle := Toggle {
+        label: @tr("Show on Discord");
+        checked: PlayerState.discord;
+        toggled(on) => {
+            PlayerState.set-discord(on);
+        }
+    }
+}
+
+export component ThemeRow inherits SettingRow {
+    title: @tr("Theme");
+    description: @tr("Follow the system setting, or always use the light or dark theme.");
+    forward-focus: choice;
+
+    choice := SegmentedChoice {
+        label: @tr("Theme");
+        options: [@tr("System"), @tr("Light"), @tr("Dark")];
+        current-index: Theme.mode == ThemeMode.light ? 1 : Theme.mode == ThemeMode.dark ? 2 : 0;
+        selected(index) => {
+            Theme.mode = index == 1 ? ThemeMode.light : index == 2 ? ThemeMode.dark : ThemeMode.system;
+            Theme.preferences-changed();
+        }
+    }
+}
+
+export component ZoomRow inherits SettingRow {
+    title: @tr("Zoom");
+    description: @tr("Makes everything larger or smaller than your operating system's display scale. Ctrl+= and Ctrl+- zoom too, and Ctrl+0 goes back to 100%.");
+
+    HorizontalLayout {
+        spacing: Theme.space-s;
+
+        IconButton {
+            glyph: Glyph.minus;
+            label: @tr("Zoom out");
+            enabled: Theme.zoom > Theme.zoom-smallest + 0.001;
+            clicked => {
+                Theme.zoom-by(-1);
+            }
+        }
+
+        Text {
+            min-width: 56px;
+            text: @tr("{}%", round(Theme.zoom * 100));
+            color: Theme.colors.text;
+            font-size: Theme.font-body;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            accessible-label: @tr("Zoom");
+            accessible-value: self.text;
+        }
+
+        IconButton {
+            glyph: Glyph.plus;
+            label: @tr("Zoom in");
+            enabled: Theme.zoom < Theme.zoom-largest - 0.001;
+            clicked => {
+                Theme.zoom-by(1);
+            }
+        }
+    }
+}
+
+export component MotionRow inherits SettingRow {
+    title: @tr("Reduce motion");
+    description: @tr("Turns off transitions, such as fading pages and the moving page marker. System follows your operating system's setting where it has one.");
+
+    choice := SegmentedChoice {
+        label: @tr("Reduce motion");
+        options: [@tr("System"), @tr("On"), @tr("Off")];
+        current-index: Theme.motion-choice == ReduceMotion.on ? 1 : Theme.motion-choice == ReduceMotion.off ? 2 : 0;
+        selected(index) => {
+            Theme.motion-choice = index == 1 ? ReduceMotion.on : index == 2 ? ReduceMotion.off : ReduceMotion.system;
+            Theme.preferences-changed();
+        }
+    }
+}
