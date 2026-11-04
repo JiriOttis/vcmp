@@ -4,8 +4,12 @@ import { Glyph } from "icons.slint";
 import { Confirmation } from "confirmation.slint";
 import { BackButton, TrackList, TrackRow } from "album-page.slint";
 import { MovingPicture, PictureFrame, PictureSlot } from "picture.slint";
+import { Favourites, FavouritesPicture } from "favourites.slint";
 
 export struct PlaylistDetail {
+    // The Favourites playlist: its name and heart are fixed, and it can't be
+    // renamed, deleted or reordered; taking a track out unlikes it.
+    favourites: bool,
     name: string,
     track-count: int,
     // Entries whose file is gone; playback skips them.
@@ -36,7 +40,8 @@ export struct PlaylistDetail {
 
 // One playlist: its picture and name, what can be done with it, and its tracks in
 // order. The name turns into a field while it is renamed; deleting asks first, in a
-// dialog (`Confirmation`).
+// dialog (`Confirmation`). The Favourites playlist shows here too, newest first and
+// read-only: it plays, shuffles and exports, and its hearts and menus take tracks out.
 export component PlaylistView {
     in property <PlaylistDetail> playlist;
     // Names the page the back button returns to.
@@ -75,7 +80,7 @@ export component PlaylistView {
     // The dialog shows this page's question.
     private property <bool> asked;
     private property <int> answers: Confirmation.answers;
-    private property <string> name: root.playlist.name;
+    private property <string> name: root.playlist.favourites ? Favourites.name : root.playlist.name;
     // The picture as large as the page allows beside the details.
     private property <length> picture-size: Theme.detail-cover-size(root.width);
 
@@ -171,7 +176,11 @@ export component PlaylistView {
                         clip: true;
                         background: Theme.colors.surface;
 
-                        if root.playlist.has-picture: MovingPicture {
+                        if root.playlist.favourites: FavouritesPicture {
+                            width: parent.width;
+                            height: parent.height;
+                        }
+                        if root.playlist.has-picture && !root.playlist.favourites: MovingPicture {
                             width: parent.width;
                             height: parent.height;
                             still: root.playlist.picture;
@@ -181,7 +190,7 @@ export component PlaylistView {
                             image-fit: ImageFit.cover;
                             accessible-role: none;
                         }
-                        if !root.playlist.has-picture: Text {
+                        if !root.playlist.has-picture && !root.playlist.favourites: Text {
                             text: root.playlist.initial;
                             color: Theme.colors.text-muted;
                             font-size: 64px;
@@ -204,7 +213,7 @@ export component PlaylistView {
                         }
 
                         if !root.renaming: Text {
-                            text: root.playlist.name;
+                            text: root.name;
                             color: Theme.colors.text;
                             font-size: Theme.font-display;
                             font-weight: Theme.weight-strong;
@@ -276,7 +285,7 @@ export component PlaylistView {
 
                             if root.tracks.length > 0: Button {
                                 text: @tr("Play");
-                                label: @tr("Play {}", root.playlist.name);
+                                label: @tr("Play {}", root.name);
                                 primary: true;
                                 clicked => {
                                     root.play(-1, false);
@@ -284,7 +293,7 @@ export component PlaylistView {
                             }
                             if root.tracks.length > 0: Button {
                                 text: @tr("Shuffle");
-                                label: @tr("Shuffle {}", root.playlist.name);
+                                label: @tr("Shuffle {}", root.name);
                                 clicked => {
                                     root.play(-1, true);
                                 }
@@ -295,20 +304,21 @@ export component PlaylistView {
                                 width: Theme.target-height;
                                 height: Theme.target-height;
 
+                                // Favourites keeps its name and heart, and stays.
                                 Menu {
-                                    MenuItem {
+                                    if !root.playlist.favourites: MenuItem {
                                         title: @tr("Rename");
                                         activated => {
                                             root.start-rename();
                                         }
                                     }
-                                    MenuItem {
+                                    if !root.playlist.favourites: MenuItem {
                                         title: @tr("Choose picture…");
                                         activated => {
                                             root.choose-picture();
                                         }
                                     }
-                                    if root.playlist.own-picture: MenuItem {
+                                    if root.playlist.own-picture && !root.playlist.favourites: MenuItem {
                                         title: @tr("Use album covers");
                                         activated => {
                                             root.clear-picture();
@@ -320,8 +330,8 @@ export component PlaylistView {
                                             root.export();
                                         }
                                     }
-                                    MenuSeparator { }
-                                    MenuItem {
+                                    if !root.playlist.favourites: MenuSeparator { }
+                                    if !root.playlist.favourites: MenuItem {
                                         title: @tr("Delete playlist…");
                                         activated => {
                                             root.ask-delete();
@@ -331,7 +341,7 @@ export component PlaylistView {
 
                                 more := IconButton {
                                     glyph: Glyph.more;
-                                    label: @tr("More for {}", root.playlist.name);
+                                    label: @tr("More for {}", root.name);
                                     clicked => {
                                         actions.show({ x: 0, y: self.height });
                                     }
@@ -389,7 +399,9 @@ export component PlaylistView {
                 }
 
                 if !root.playlist.failed && root.tracks.length == 0: Text {
-                    text: @tr("This playlist is empty. To add a track, open its menu with a right click or the Menu key, and choose Add to playlist.");
+                    text: root.playlist.favourites
+                        ? @tr("Nothing is in your favourites yet. To add a track, click the heart beside its time, or open its menu with a right click or the Menu key and choose Add to Favourites.")
+                        : @tr("This playlist is empty. To add a track, open its menu with a right click or the Menu key, and choose Add to playlist.");
                     color: Theme.colors.text;
                     font-size: Theme.font-body;
                     wrap: word-wrap;
@@ -401,7 +413,7 @@ export component PlaylistView {
                     label: @tr("Tracks");
                     detail-heading: @tr("Artist and album");
                     tracks: root.tracks;
-                    editable: true;
+                    editable: !root.playlist.favourites;
                     playing-path: root.playing-path;
                     play(index) => {
                         root.play(index, false);

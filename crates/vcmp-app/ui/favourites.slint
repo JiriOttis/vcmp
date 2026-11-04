@@ -1,0 +1,39 @@
+// Favourites: the tracks the owner liked, kept in VCMP's database only and shown as
+// a playlist pinned first among the playlists. Rust keeps the state (src/favourites.rs);
+// every heart and menu entry goes through it, and it updates every heart on screen.
+
+import { Theme } from "theme.slint";
+import { Glyph, Icon } from "icons.slint";
+
+export global Favourites {
+    // The playlist's fixed name, in the UI's language.
+    out property <string> name: @tr("Favourites");
+    // Every track the menu about to open acts on is liked already, so its entry takes
+    // them out instead of adding. A menu asks just before it opens; the track lists
+    // and the songs table ask through `TrackSelection` and `SongSelection`, by their
+    // rows, an album's menus here.
+    in property <bool> menu-removes;
+    callback prepare-album(int);
+    // Likes the album's tracks, or takes them all out when all are liked.
+    callback toggle-album(int);
+    // Likes one track by its library id, or takes it out: a row's heart, the player
+    // bar's, and the menus of the queue and the now playing view.
+    callback toggle-track(int);
+
+    // The words of the entry in every track and album menu.
+    public pure function entry(removes: bool) -> string {
+        removes ? @tr("Remove from Favourites") : @tr("Add to Favourites")
+    }
+}
+
+// The picture of the Favourites playlist: a heart on the surface, instead of covers.
+export component FavouritesPicture inherits Rectangle {
+    background: Theme.colors.surface;
+
+    Icon {
+        width: parent.width / 2;
+        height: parent.width / 2;
+        glyph: Glyph.heart-filled;
+        tint: Theme.colors.accent;
+    }
+}

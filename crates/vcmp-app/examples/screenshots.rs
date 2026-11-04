@@ -253,8 +253,11 @@ const SHOTS: &[Shot] = &[
     shot("search-dark", ThemeMode::Dark, 0, None, 0),
     shot("playlists-light", ThemeMode::Light, 3, None, 0),
     shot("playlists-dark", ThemeMode::Dark, 3, None, 0),
-    shot("playlist-light", ThemeMode::Light, 3, Some(0), 0),
-    shot("playlist-dark", ThemeMode::Dark, 3, Some(0), 0),
+    // Favourites comes first in the grid, the owner's playlists after it.
+    shot("favourites-light", ThemeMode::Light, 3, Some(0), 0),
+    shot("favourites-dark", ThemeMode::Dark, 3, Some(0), 0),
+    shot("playlist-light", ThemeMode::Light, 3, Some(1), 0),
+    shot("playlist-dark", ThemeMode::Dark, 3, Some(1), 0),
     shot("labels-light", ThemeMode::Light, 4, None, 0),
     shot("labels-dark", ThemeMode::Dark, 4, None, 0),
     shot("songs-light", ThemeMode::Light, 5, None, 0),

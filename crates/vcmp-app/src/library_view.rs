@@ -1,8 +1,8 @@
 //! Connects the library to the window: the album grid and the album page that
 //! opens from it, the artist grid with the artist page and its albums, search, the
-//! songs table, the folder browser, the playlists and the labels.
+//! songs table, the folder browser, the playlists, the labels and the favourites.
 //! All of them are reloaded after every library change, and their rows after every
-//! change of labels.
+//! change of labels; a change of favourites updates the rows' hearts in place.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -14,10 +14,11 @@ use slint::{ComponentHandle, Image, Model, ModelRc, Timer, TimerMode, VecModel};
 use vcmp_library::{Album, AlbumId, Artist, ArtistId, Library, Playlist, Track, animation};
 
 use crate::albums::{AlbumBrowser, Card, CoverGrid, Grid, album_initial, cards, initial};
+use crate::favourites::{self, Hearts};
 use crate::folders::FolderBrowser;
 use crate::labels::{self, LabelBrowser};
 use crate::moving_pictures::{self, Picture};
-use crate::playlists::{self, PlaylistBrowser};
+use crate::playlists::{self, PlaylistBrowser, PlaylistKey};
 use crate::{
     AlbumDetail, AlbumTile, AppWindow, ArtistDetail, LabelFilterPage, Playlists, SongColumn,
     SongRow, TrackRow,
@@ -52,6 +53,7 @@ pub struct LibraryView {
     folders: Rc<FolderBrowser>,
     playlists: Rc<PlaylistBrowser>,
     labels: Rc<LabelBrowser>,
+    hearts: Rc<Hearts>,
 }
 
 /// Setting key: the Songs page's sort, as "<column>" or "<column>:reverse".
@@ -92,11 +94,13 @@ impl LibraryView {
     /// Shows the library's albums. Keep the view alive as long as the window.
     pub fn connect(window: &AppWindow, library: Rc<Library>) -> vcmp_library::Result<Rc<Self>> {
         let albums = library.albums()?;
-        // First, so the rows the others make show their labels.
+        // First, so the rows the others make show their labels and hearts.
         let labels = LabelBrowser::connect(window, library.clone());
+        let hearts = Hearts::connect(window, library.clone());
         let browser = AlbumBrowser::connect(window, &albums);
         let folders = FolderBrowser::connect(window, library.clone());
         let playlists = PlaylistBrowser::connect(window, library.clone());
+        hearts.set_playlists(Rc::downgrade(&playlists));
         let artist_grid = CoverGrid::connect(window, Grid::Artists, Vec::new(), 2);
         let artist_albums_grid = CoverGrid::connect(window, Grid::ArtistAlbums, Vec::new(), 2);
         let weak = Rc::downgrade(&artist_grid);
@@ -126,6 +130,7 @@ impl LibraryView {
             folders,
             playlists,
             labels,
+            hearts,
         });
         view.labels.set_view(Rc::downgrade(&view));
         if let Some((column, descending)) = view
@@ -219,7 +224,7 @@ impl LibraryView {
                 .ok()
                 .and_then(|index| view.found.borrow().playlists.get(index).map(|p| p.id));
             if let Some(playlist) = playlist {
-                view.playlists.open(playlist);
+                view.playlists.open(PlaylistKey::Playlist(playlist));
             }
         });
         let weak = Rc::downgrade(&view);
@@ -384,6 +389,11 @@ impl LibraryView {
 
     pub fn labels(&self) -> &Rc<LabelBrowser> {
         &self.labels
+    }
+
+    /// The favourites: every heart and favourites menu entry.
+    pub fn hearts(&self) -> &Rc<Hearts> {
+        &self.hearts
     }
 
     /// The album most of the open album page's tracks belong to now, after a change
@@ -571,6 +581,8 @@ impl LibraryView {
                 duration: format_duration(track.duration).into(),
                 path: track.path.to_string_lossy().as_ref().into(),
                 labels: labels::chips(track.id),
+                track_id: favourites::row_id(track.id),
+                liked: favourites::liked(track.id),
                 ..TrackRow::default()
             })
             .collect();
@@ -651,6 +663,8 @@ impl LibraryView {
                 path: track.path.to_string_lossy().as_ref().into(),
                 selected: false,
                 labels: labels::chips(track.id),
+                track_id: favourites::row_id(track.id),
+                liked: favourites::liked(track.id),
             })
             .collect();
         window.set_songs(ModelRc::new(VecModel::from(rows)));
@@ -926,6 +940,8 @@ fn show_artist_details(
             duration: format_duration(track.duration).into(),
             path: track.path.to_string_lossy().as_ref().into(),
             labels: labels::chips(track.id),
+            track_id: favourites::row_id(track.id),
+            liked: favourites::liked(track.id),
             ..TrackRow::default()
         })
         .collect();
@@ -981,6 +997,8 @@ fn show_album(window: &AppWindow, library: &Library, album: &Album) {
                 unavailable: false,
                 selected: false,
                 labels: labels::chips(track.id),
+                track_id: favourites::row_id(track.id),
+                liked: favourites::liked(track.id),
             }
         })
         .collect();

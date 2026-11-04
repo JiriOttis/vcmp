@@ -8,6 +8,7 @@ import { SelectionChange } from "selection.slint";
 import { ColumnEdge, ColumnWidths } from "columns.slint";
 import { LabelChips, LabelEntry, LabelWords, Labels } from "labels.slint";
 import { MovingPicture, PictureFrame, PictureSlot } from "picture.slint";
+import { Favourites } from "favourites.slint";
 
 export struct AlbumDetail {
     // The library's id, for the menu that labels the album's tracks.
@@ -56,6 +57,10 @@ export struct TrackRow {
     selected: bool,
     // The track's labels, by name.
     labels: [LabelEntry],
+    // The library's id of the track, for its heart.
+    track-id: int,
+    // The track is among the favourites.
+    liked: bool,
 }
 
 // The selection in a track list, kept in its rows (src/selection.rs). The menu's
@@ -72,6 +77,10 @@ export global TrackSelection {
     callback prepare-labels([TrackRow], int);
     callback toggle-label([TrackRow], int, int);
     callback new-label([TrackRow], int);
+    // The favourites entry: sets `Favourites.menu-removes` before the menu opens,
+    // then likes the tracks, or takes them out when all are liked.
+    callback prepare-favourites([TrackRow], int);
+    callback toggle-favourites([TrackRow], int);
 }
 
 // Returns to the page before. The chevron points the way back.
@@ -178,6 +187,8 @@ export component TrackLine {
     in property <bool> draggable;
     callback drag-moved(length, length);
     callback drag-ended();
+    // The heart beside the time was clicked: like the track, or take it out.
+    callback heart-clicked();
 
     // The press became a drag, so letting go plays nothing.
     private property <bool> dragging;
@@ -192,8 +203,14 @@ export component TrackLine {
     private property <bool> joined-below: root.track.selected && root.selected-below;
     // The pointer is on the play button, in the number's place.
     private property <bool> on-play-button: touch.has-hover && touch.mouse-x < number.x + number.width + Theme.space-l / 2;
-    private property <string> spoken: root.track.unavailable ? @tr("{0}, file not found", root.track.title)
+    // A track of the library has a heart: always while liked, otherwise under the
+    // pointer. It is no tab stop; the menu's favourites entry is the keyboard's way.
+    private property <bool> has-heart: root.track.track-id > 0;
+    private property <bool> heart-shown: root.has-heart && (root.track.liked || touch.has-hover);
+    private property <bool> on-heart: root.heart-shown && touch.mouse-x >= heart.x - Theme.space-l / 2 && touch.mouse-x < heart.x + heart.width + Theme.space-l / 2;
+    private property <string> spoken-track: root.track.unavailable ? @tr("{0}, file not found", root.track.title)
         : root.track.artist == "" ? root.track.title : @tr("{0}, {1}", root.track.title, root.track.artist);
+    private property <string> spoken: root.track.liked ? @tr("{0}, in Favourites", root.spoken-track) : root.spoken-track;
 
     changed focused => {
         if self.focused {
@@ -308,6 +325,19 @@ export component TrackLine {
                     accessible-role: none;
                 }
 
+                heart := Rectangle {
+                    width: 24px;
+
+                    if root.heart-shown: Icon {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: 16px;
+                        height: 16px;
+                        glyph: root.track.liked ? Glyph.heart-filled : Glyph.heart;
+                        tint: root.track.liked ? Theme.colors.accent : root.secondary;
+                    }
+                }
+
                 Text {
                     width: 64px;
                     text: root.track.duration;
@@ -320,7 +350,7 @@ export component TrackLine {
             }
 
             touch := TouchArea {
-                mouse-cursor: root.dragging ? MouseCursor.grabbing : root.on-play-button ? MouseCursor.pointer : MouseCursor.default;
+                mouse-cursor: root.dragging ? MouseCursor.grabbing : root.on-play-button || root.on-heart ? MouseCursor.pointer : MouseCursor.default;
                 clicked => {
                     if root.dragged {
                         root.dragged = false;
@@ -328,13 +358,15 @@ export component TrackLine {
                         Theme.keyboard-navigation = false;
                         if root.on-play-button && !root.toggle-click && !root.range-click {
                             root.play-requested();
+                        } else if root.on-heart && !root.toggle-click && !root.range-click {
+                            root.heart-clicked();
                         } else {
                             root.clicked(root.toggle-click, root.range-click);
                         }
                     }
                 }
                 double-clicked => {
-                    if !root.on-play-button && !root.dragging {
+                    if !root.on-play-button && !root.on-heart && !root.dragging {
                         root.play-requested();
                     }
                 }
@@ -372,8 +404,9 @@ export component TrackLine {
 
 // Tracks as a list that is one tab stop: Up/Down and Home/End move, Enter plays,
 // and the Menu key (or a right click) opens a track's menu: Play now, Play next,
-// Add to queue, Add to playlist, Edit tags. A click selects a track; a double-click
-// or the play button in the number's place plays from it. Several tracks can be
+// Add to queue, Add to Favourites, Add to playlist, Edit tags. A click selects a
+// track; a double-click or the play button in the number's place plays from it, and
+// the heart beside the time likes it. Several tracks can be
 // selected for the menu: Ctrl+click (Cmd on macOS) or Ctrl+Space toggles one,
 // Shift+click or Shift+arrows select a range, Ctrl+A selects all, Escape clears.
 // A playlist's own list (`editable`) also moves and removes
@@ -444,6 +477,7 @@ export component TrackList {
         }
         root.current = index;
         TrackSelection.prepare-labels(root.tracks, index);
+        TrackSelection.prepare-favourites(root.tracks, index);
         menu.show({ x: x - menu.absolute-position.x, y: y - menu.absolute-position.y });
     }
 
@@ -494,6 +528,10 @@ export component TrackList {
                     font-size: Theme.font-small;
                     vertical-alignment: center;
                     overflow: elide;
+                }
+                // Above the rows' hearts.
+                Rectangle {
+                    width: 24px;
                 }
                 Text {
                     width: 64px;
@@ -562,6 +600,12 @@ export component TrackList {
                         title: @tr("Add to queue");
                         activated => {
                             root.queue(root.current, false);
+                        }
+                    }
+                    MenuItem {
+                        title: Favourites.entry(Favourites.menu-removes);
+                        activated => {
+                            TrackSelection.toggle-favourites(root.tracks, root.current);
                         }
                     }
                     Menu {
@@ -660,8 +704,10 @@ export component TrackList {
                         } else if event.text == Key.Return || event.text == Key.Space {
                             root.play(root.current);
                         } else if event.text == Key.Menu || (event.modifiers.shift && event.text == Key.F10) {
-                            // The menu opens on its own; it needs the current labels first.
+                            // The menu opens on its own; it needs the current labels
+                            // and favourites first.
                             TrackSelection.prepare-labels(root.tracks, root.current);
+                            TrackSelection.prepare-favourites(root.tracks, root.current);
                             return reject;
                         } else {
                             return reject;
@@ -715,6 +761,9 @@ export component TrackList {
                             play-requested => {
                                 root.current = index;
                                 root.play(index);
+                            }
+                            heart-clicked => {
+                                Favourites.toggle-track(track.track-id);
                             }
                             menu-requested(x, y) => {
                                 root.show-menu(index, x, y);
@@ -972,6 +1021,13 @@ export component AlbumView {
                                         }
                                     }
                                     if (!root.album.has-cover && !root.album.unknown) || root.album.fetched-cover: MenuSeparator { }
+                                    // Every track the album has now.
+                                    MenuItem {
+                                        title: Favourites.entry(Favourites.menu-removes);
+                                        activated => {
+                                            Favourites.toggle-album(root.album.id);
+                                        }
+                                    }
                                     // The whole album into a playlist.
                                     Menu {
                                         title: @tr("Add to playlist");
@@ -1024,6 +1080,7 @@ export component AlbumView {
                                     label: @tr("More for {}", root.shown-title);
                                     clicked => {
                                         Labels.prepare-album(root.album.id);
+                                        Favourites.prepare-album(root.album.id);
                                         actions.show({ x: 0, y: self.height });
                                     }
                                 }

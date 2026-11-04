@@ -40,8 +40,10 @@ mod agent_playback;
 pub use agent_playback::AppPlayback;
 
 use crate::albums::initial;
+use crate::favourites;
 use crate::library_view::{LibraryView, format_duration};
 use crate::moving_pictures::{self, Picture};
+use crate::playlists::PlaylistKey;
 use crate::saved_queue;
 use crate::selection::{self, Selectable};
 use crate::{
@@ -53,9 +55,11 @@ pub const SETTING_VOLUME: &str = "playback.volume";
 pub const SETTING_SHUFFLE: &str = "playback.shuffle";
 pub const SETTING_SHUFFLE_KIND: &str = "playback.shuffle_kind";
 pub const SETTING_REPEAT: &str = "playback.repeat";
-/// The context origins of tracks played from search results and from the Songs page.
+/// The context origins of tracks played from search results, from the Songs page and
+/// from the favourites.
 const SEARCH_ORIGIN: &str = "search";
 const SONGS_ORIGIN: &str = "songs";
+const FAVOURITES_ORIGIN: &str = "favourites";
 
 /// The output device by name; absent or empty for the system default.
 pub const SETTING_OUTPUT_DEVICE: &str = "playback.output_device";
@@ -788,9 +792,13 @@ impl PlayerService {
         if shuffle {
             self.set_shuffle(Shuffle::On);
         }
+        let origin = match playlist.key {
+            PlaylistKey::Favourites => FAVOURITES_ORIGIN.to_owned(),
+            PlaylistKey::Playlist(id) => format!("playlist:{}", id.0),
+        };
         self.player.send(Command::PlayContext {
             entries,
-            origin: Some(format!("playlist:{}", playlist.id.0)),
+            origin: Some(origin),
             start: if shuffle { None } else { first },
         });
     }
@@ -1114,6 +1122,7 @@ impl PlayerService {
         state.set_queue_source(match view.origin.as_deref() {
             Some(SEARCH_ORIGIN) => QueueSource::Search,
             Some(SONGS_ORIGIN) => QueueSource::Songs,
+            Some(FAVOURITES_ORIGIN) => QueueSource::Favourites,
             _ => QueueSource::Named,
         });
     }
@@ -1137,6 +1146,8 @@ impl PlayerService {
                     has_cover: cover.is_some(),
                     cover: cover.unwrap_or_default(),
                     path: entry.track.id.as_ref().into(),
+                    track_id: favourites::row_id(track.id),
+                    liked: favourites::liked(track.id),
                 }
             }
             None => QueueRow {
@@ -1497,6 +1508,8 @@ impl PlayerService {
         let Some(now) = now else {
             state.set_has_track(false);
             state.set_track_path("".into());
+            state.set_track_id(0);
+            state.set_liked(false);
             state.set_lossless_format(SharedString::default());
             state.set_has_cover(false);
             state.set_cover(Image::default());
@@ -1575,6 +1588,9 @@ impl PlayerService {
         self.update_presence();
 
         state.set_lossless_format(lossless_format(track.as_ref()).into());
+        let id = track.as_ref().map(|track| track.id);
+        state.set_track_id(id.map_or(0, favourites::row_id));
+        state.set_liked(id.is_some_and(favourites::liked));
         state.set_has_track(true);
         state.set_initial(initial(&title).into());
         state.set_title(title.into());

@@ -317,3 +317,46 @@ fn wrapped_text_asks_for_its_own_height() {
         missing.join("\n")
     );
 }
+
+/// Every menu for tracks or an album (one that plays them next or adds them to a
+/// playlist) has the favourites entry, the keyboard's way to like where no heart is
+/// drawn (or a heart is no tab stop).
+#[test]
+fn every_track_and_album_menu_offers_favourites() {
+    let mut menus = 0;
+    let mut missing = Vec::new();
+    for path in slint_sources() {
+        let lines = code_lines(&path);
+        for (start, (number, line)) in lines.iter().enumerate() {
+            if !line.contains("ContextMenuArea {") {
+                continue;
+            }
+            let mut depth = 0i32;
+            let mut block = String::new();
+            for (_, other) in &lines[start..] {
+                block.push_str(other);
+                block.push('\n');
+                depth += other.matches('{').count() as i32 - other.matches('}').count() as i32;
+                if depth == 0 {
+                    break;
+                }
+            }
+            if !block.contains("@tr(\"Play next\")") && !block.contains("@tr(\"Add to playlist\")")
+            {
+                continue;
+            }
+            menus += 1;
+            if !block.contains("Favourites.entry(") {
+                missing.push(format!("{}:{number}", path.display()));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "track or album menus without the favourites entry:\n{}",
+        missing.join("\n")
+    );
+    // The track lists, the songs table, the queue, now playing, the album page and
+    // the two album grids: a sign the search above still finds them.
+    assert!(menus >= 7, "found only {menus} track and album menus");
+}

@@ -4,6 +4,7 @@ import { Glyph } from "icons.slint";
 import { PlayerState, QueueRow, QueueSource } from "player-state.slint";
 import { Playlists } from "playlist-state.slint";
 import { Labels } from "labels.slint";
+import { Favourites } from "favourites.slint";
 
 // One track in the queue. A right click asks the panel for the track's menu.
 component QueueLine {
@@ -206,12 +207,15 @@ export component QueuePanel inherits Rectangle {
         }
     }
 
-    // The file of the row the menu is for.
-    function current-path() -> string {
+    // The row the menu is for.
+    pure function current-row() -> QueueRow {
         if root.current < root.up-next-count {
-            return PlayerState.up-next[root.current].path;
+            return PlayerState.up-next[root.current];
         }
-        PlayerState.upcoming[root.current - root.up-next-count].path
+        PlayerState.upcoming[root.current - root.up-next-count]
+    }
+    pure function current-path() -> string {
+        root.current-row().path
     }
 
     function show-menu(index: int, x: length, y: length) {
@@ -335,6 +339,12 @@ export component QueuePanel inherits Rectangle {
                                 title: @tr("Add to queue");
                                 activated => {
                                     PlayerState.queue-upcoming(root.current - root.up-next-count, false);
+                                }
+                            }
+                            if root.current-row().track-id > 0: MenuItem {
+                                title: Favourites.entry(root.current-row().liked);
+                                activated => {
+                                    Favourites.toggle-track(root.current-row().track-id);
                                 }
                             }
                             Menu {
@@ -476,6 +486,7 @@ export component QueuePanel inherits Rectangle {
                                 if PlayerState.upcoming.length > 0: SectionLabel {
                                     text: PlayerState.queue-source == QueueSource.search ? @tr("Next from your search")
                                         : PlayerState.queue-source == QueueSource.songs ? @tr("Next from all songs")
+                                        : PlayerState.queue-source == QueueSource.favourites ? @tr("Next from {}", Favourites.name)
                                         : PlayerState.queue-origin != "" ? @tr("Next from {}", PlayerState.queue-origin) : @tr("Next up");
                                     height: Theme.target-height;
                                     vertical-alignment: bottom;

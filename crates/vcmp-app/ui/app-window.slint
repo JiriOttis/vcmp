@@ -30,8 +30,9 @@ import { LabelDetail, LabelsPage } from "label-page.slint";
 import { CaptionButtons, WindowFrame } from "window-frame.slint";
 import { ConfirmDialog, Confirmation } from "confirmation.slint";
 import { Setup, SetupWizard } from "setup.slint";
+import { Favourites } from "favourites.slint";
 
-export { Confirmation, Setup, WindowFrame }
+export { Confirmation, Favourites, Setup, WindowFrame }
 export { LabelChoice, LabelDetail, LabelEntry, LabelFilterPage, LabelProblem, Labels, PaletteColour }
 export { AgentState, ChangeEntry, ChangeField, ChangeGroup, ChangeKind, ChangeProblem, ChangeRow, ChangeStatus, ReviewStatus, ServerStatus }
 export { LastfmProblem, LastfmState, LastfmStatus }
@@ -88,7 +89,9 @@ export component AppWindow inherits Window {
     callback play-artist(bool);
     callback play-artist-appearance(int);
     callback queue-artist-appearance(int, bool);
-    // The Playlists page: its grid, and the playlist open instead of it.
+    // The Playlists page: its grid, and the playlist open instead of it. Favourites
+    // comes first in the grid and the sidebar, so the owner's playlists count from 1
+    // there (and from 0 in `Playlists.names`).
     in property <[AlbumTile]> playlists;
     in-out property <bool> playlist-open;
     in property <PlaylistDetail> playlist-detail;
@@ -485,8 +488,10 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // The playlists, below the sections.
-                                if Playlists.names.length > 0: VerticalLayout {
+                                // The playlists, below the sections: Favourites first,
+                                // always, then the owner's by name. Their places count
+                                // from Favourites, as in the Playlists page's grid.
+                                VerticalLayout {
                                     spacing: Theme.space-s;
 
                                     HorizontalLayout {
@@ -505,11 +510,21 @@ export component AppWindow inherits Window {
                                         accessible-role: list;
                                         accessible-label: @tr("Playlists");
 
+                                        PlaylistLink {
+                                            label: Favourites.name;
+                                            selected: root.current-page == Page.playlists && root.playlist-open && root.open-playlist-index == 0;
+                                            activated => {
+                                                root.show-playlist(0);
+                                            }
+                                            shown-focused(top, height) => {
+                                                root.show-in-sidebar(top, height);
+                                            }
+                                        }
                                         for name[index] in Playlists.names: PlaylistLink {
                                             label: name;
-                                            selected: root.current-page == Page.playlists && root.playlist-open && index == root.open-playlist-index;
+                                            selected: root.current-page == Page.playlists && root.playlist-open && index + 1 == root.open-playlist-index;
                                             activated => {
-                                                root.show-playlist(index);
+                                                root.show-playlist(index + 1);
                                             }
                                             shown-focused(top, height) => {
                                                 root.show-in-sidebar(top, height);

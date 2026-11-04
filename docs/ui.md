@@ -65,6 +65,8 @@ DESIGN.md).
 | `ui/labels.slint` | `Labels` global, `LabelEntry`, `LabelDot`, `LabelChip(s)`, `LabelFilter` (the Songs and Albums pages' label filter), `LabelEditor` (the dialog that makes or edits a label, with the palette and the custom colour picker) and the Labels section of Settings |
 | `ui/label-page.slint` | `LabelsPage`: the Labels section's list, and `LabelView`, one label's tracks with Play and Shuffle |
 | `src/labels.rs` | `LabelBrowser`: labels behind the `Labels` global: the menus' choices and toggles, the dialog, the filters, the label page, the chips rows show, the colour picker's images |
+| `ui/favourites.slint` | `Favourites` global (the fixed name, the menus' entry and the hearts' callbacks) and `FavouritesPicture`, the heart the Favourites playlist shows for a picture |
+| `src/favourites.rs` | `Hearts`: the liked set rows read, the one path that likes and unlikes, and the update of every heart on screen |
 | `src/theme.rs` | The light and dark palettes and the labels' colours, plus their contrast tests |
 | `src/zoom.rs` | The zoom: its steps, and the window's scale factor as the system's times the zoom |
 
@@ -79,6 +81,7 @@ DESIGN.md).
 | Every wrapped text sets `min-height: self.preferred-height` (or its height outright). Slint 1.18.1 measures an element an `if` creates at its single-line width, so a wrapped text there lost its last lines ([slint-ui/slint#13655](https://github.com/slint-ui/slint/issues/13655), fixed after 1.18.1); a text's own preferred height follows its real width. Drop the rule once Slint is past the fix | `tests/ui_invariants.rs` |
 | Clicking, keyboard-only use, theme choice and reduced motion (the user's choice against the system's) behave as designed; nothing leaves a 720 px wide window | `tests/ui_behaviour.rs` |
 | No std-widgets `ScrollView`: every scrolling part is a `ScrollArea`, which draws no scroll bar; the queue and Settings show none, and the queue's rows and Clear end inside the panel | `tests/ui_invariants.rs`, `tests/player.rs` |
+| Every track or album menu (one with Play next or Add to playlist) has the favourites entry | `tests/ui_invariants.rs` |
 
 ## Palettes
 
@@ -354,12 +357,15 @@ the new view in too.
 
 ## Playlists page
 
-- **In the sidebar:** Playlists comes after Artists. Below the sections, the
-  playlists are listed by name, and each opens its page; the open one is
-  highlighted.
-- **The grid** shows each playlist's picture, name and number of tracks. New
-  playlist makes "Playlist n" and opens it with the name field focused and
-  selected, ready to be typed over. Without playlists the page says how to make one.
+- **In the sidebar:** Playlists comes after Artists. Below the sections, Favourites
+  is listed first, always, then the playlists by name; each opens its page, and the
+  open one is highlighted.
+- **The grid** shows each playlist's picture, name and number of tracks, Favourites
+  first (see [Favourites](#favourites)). Places in the grid and the sidebar count
+  from Favourites; `Playlists.names`, which the Add to playlist menus list, holds
+  the owner's playlists alone. New playlist makes "Playlist n" and opens it with the
+  name field focused and selected, ready to be typed over. With no playlist of the
+  owner's yet, the page says how to make one above the grid.
 - **A playlist's page** (`PlaylistView`) shows its picture, name, number of tracks,
   minutes of the tracks that can play and how many files are not found, then
   Play, Shuffle and a More button (a right click on it does the same) with
@@ -1087,6 +1093,40 @@ by `LibraryView`) keeps the `Labels` global current.
 - **Settings** lists every label with its dot and count, Edit… (the dialog) and
   Delete…, which asks first in the confirmation dialog, saying how many tracks lose
   it. Cancelled, the focus goes back to that Delete… button.
+
+## Favourites
+
+The tracks the owner liked ([favourites spec](specs/2026-11-04-favourites-and-lastfm-loves.md),
+storage in [library.md](library.md#favourites)). `Hearts` (`src/favourites.rs`,
+owned by `LibraryView`) answers the `Favourites` global.
+
+- **One path.** Every heart and menu entry calls `Hearts::set`, which writes the
+  database, reads the liked set again, and writes the liked flag of every row on
+  screen that changed (track lists, the songs table, the queue), the player bar's
+  heart, and the Favourites card and page. Rows are updated in place rather than
+  rebuilt, so a heart answers at once even with the songs table loaded.
+- **Rows** (`TrackRow`, `SongRow`, `QueueRow`) carry the track's id and a liked
+  flag; builders read `favourites::liked(track)` as they read labels' chips.
+- **Hearts** sit in track lists (album, artist, playlist, label, search and folder
+  pages), between the title and the time: shown under the pointer, and always
+  while liked, filled in the accent. Like the play button in the number's place,
+  the heart is part of the row (the row's click checks where the pointer is), so it
+  is no tab stop; the row's spoken label adds "in Favourites". The player bar has a
+  heart button beside the title, a tab stop, within the track section's minimum.
+  The Songs table, the queue and the now playing view have no hearts.
+- **Menus.** Every track menu (track lists, the songs table, the queue, the now
+  playing "…" menu) and every album menu (album cards, the album page's More menu)
+  has "Add to Favourites", or "Remove from Favourites" when every track it acts on
+  is liked; adding likes the rest and keeps the others' times. Menus for several
+  tracks ask just before they open (`prepare-favourites`, `Favourites.prepare-album`),
+  like labels; the queue and now playing read the row's or the bar's flag.
+- **The Favourites playlist** is the playlist page in a read-only mode
+  (`PlaylistDetail.favourites`): a drawn heart for a picture (`FavouritesPicture`,
+  the accent on `surface`), the fixed name, newest first, Play, Shuffle and Export…
+  in its More menu, and no Rename, picture, Delete, Move or drag. Unliking a track
+  takes it off the page at once, without asking. It plays as a context of its own
+  (`favourites`, "Next from Favourites" in the queue panel). Empty, it says how to
+  like a track.
 
 ## Menus over lists
 

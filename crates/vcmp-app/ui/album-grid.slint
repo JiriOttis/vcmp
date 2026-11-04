@@ -2,6 +2,7 @@ import { Theme } from "theme.slint";
 import { FocusRing, MenuHost } from "components.slint";
 import { Labels } from "labels.slint";
 import { PlayerState } from "player-state.slint";
+import { Favourites, FavouritesPicture } from "favourites.slint";
 
 export enum ArtworkState { none, loading, loaded }
 
@@ -20,6 +21,8 @@ export struct AlbumTile {
     cover: image,
     // An "Unknown" album: shown by that name (and "Unknown artist" without one).
     unknown: bool,
+    // The Favourites playlist: a heart for its picture.
+    favourites: bool,
 }
 
 export component AlbumCard {
@@ -72,7 +75,11 @@ export component AlbumCard {
             clip: true;
             background: Theme.colors.surface;
 
-            if root.album.artwork == ArtworkState.none: Text {
+            if root.album.favourites: FavouritesPicture {
+                width: parent.width;
+                height: parent.height;
+            }
+            if root.album.artwork == ArtworkState.none && !root.album.favourites: Text {
                 text: root.album.initial;
                 color: Theme.colors.text-muted;
                 font-size: root.cover-size / 3;
@@ -143,7 +150,8 @@ export component AlbumGrid {
     in property <bool> round;
     // Playlists: track counts as subtitles.
     in property <bool> playlists;
-    // Albums whose cards have a menu: Play next, Add to queue, labels for their tracks.
+    // Albums whose cards have a menu: Play next, Add to queue, favourites and labels
+    // for their tracks.
     in property <bool> album-menu;
     // The keyboard's current card.
     in-out property <int> current: 0;
@@ -153,6 +161,7 @@ export component AlbumGrid {
     function show-menu(index: int, x: length, y: length) {
         root.current = index;
         Labels.prepare-album(root.albums[index].id);
+        Favourites.prepare-album(root.albums[index].id);
         menu.show({ x: x - menu.absolute-position.x, y: y - menu.absolute-position.y });
     }
 
@@ -199,7 +208,8 @@ export component AlbumGrid {
     accessible-role: list;
     forward-focus: focus;
 
-    // The card's menu: the album's tracks into Up next, and labels for every track.
+    // The card's menu: the album's tracks into Up next or the favourites, and labels
+    // for every track.
     // In a MenuHost, so the pointer is read right while the menu is open.
     host := MenuHost {
         width: 100%;
@@ -223,6 +233,12 @@ export component AlbumGrid {
                     title: @tr("Add to queue");
                     activated => {
                         PlayerState.queue-album(root.albums[root.current].id, false);
+                    }
+                }
+                MenuItem {
+                    title: Favourites.entry(Favourites.menu-removes);
+                    activated => {
+                        Favourites.toggle-album(root.albums[root.current].id);
                     }
                 }
                 MenuSeparator { }
@@ -276,8 +292,10 @@ export component AlbumGrid {
                     } else if event.text == Key.Return || event.text == Key.Space {
                         root.activated(root.current);
                     } else if root.album-menu && root.albums.length > 0 && (event.text == Key.Menu || (event.modifiers.shift && event.text == Key.F10)) {
-                        // The menu opens on its own; it needs the album's labels first.
+                        // The menu opens on its own; it needs the album's labels and
+                        // favourites first.
                         Labels.prepare-album(root.albums[root.current].id);
+                        Favourites.prepare-album(root.albums[root.current].id);
                         return reject;
                     } else {
                         return reject;
@@ -328,7 +346,8 @@ export component CardGrid {
     in property <bool> playlists;
     in property <length> available-width;
     in property <string> label;
-    // Albums whose cards have a menu: Play next, Add to queue, labels for their tracks.
+    // Albums whose cards have a menu: Play next, Add to queue, favourites and labels
+    // for their tracks.
     in property <bool> album-menu;
     in-out property <int> current: 0;
     callback activated(int);
@@ -336,6 +355,7 @@ export component CardGrid {
     function show-menu(index: int, x: length, y: length) {
         root.current = index;
         Labels.prepare-album(root.tiles[index].id);
+        Favourites.prepare-album(root.tiles[index].id);
         menu.show({ x: x - menu.absolute-position.x, y: y - menu.absolute-position.y });
     }
 
@@ -358,7 +378,8 @@ export component CardGrid {
     accessible-label: root.label;
     forward-focus: focus;
 
-    // The card's menu: the album's tracks into Up next, and labels for every track.
+    // The card's menu: the album's tracks into Up next or the favourites, and labels
+    // for every track.
     // In a MenuHost, so the pointer is read right while the menu is open.
     host := MenuHost {
         width: 100%;
@@ -382,6 +403,12 @@ export component CardGrid {
                     title: @tr("Add to queue");
                     activated => {
                         PlayerState.queue-album(root.tiles[root.current].id, false);
+                    }
+                }
+                MenuItem {
+                    title: Favourites.entry(Favourites.menu-removes);
+                    activated => {
+                        Favourites.toggle-album(root.tiles[root.current].id);
                     }
                 }
                 MenuSeparator { }
@@ -431,8 +458,10 @@ export component CardGrid {
                     } else if event.text == Key.Return || event.text == Key.Space {
                         root.activated(root.current);
                     } else if root.album-menu && root.tiles.length > 0 && (event.text == Key.Menu || (event.modifiers.shift && event.text == Key.F10)) {
-                        // The menu opens on its own; it needs the album's labels first.
+                        // The menu opens on its own; it needs the album's labels and
+                        // favourites first.
                         Labels.prepare-album(root.tiles[root.current].id);
+                        Favourites.prepare-album(root.tiles[root.current].id);
                         return reject;
                     } else {
                         return reject;

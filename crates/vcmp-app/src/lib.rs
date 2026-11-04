@@ -5,6 +5,7 @@ pub mod agents;
 pub mod albums;
 pub mod artist_photos;
 pub mod cover_fetch;
+pub mod favourites;
 pub mod folders;
 pub mod icons;
 pub mod labels;

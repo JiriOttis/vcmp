@@ -162,8 +162,9 @@ fn back_button_escape_and_the_sidebar_return_to_the_grid() {
 fn the_grid_works_from_the_keyboard() {
     let (_dir, window, _browser) = open();
     // Search, Albums, Artists, Playlists, Labels, Songs, Folders, Settings and About
-    // in the sidebar, the albums filter, then the grid.
-    for _ in 0..11 {
+    // in the sidebar, Favourites (always listed below them), the albums filter, then
+    // the grid.
+    for _ in 0..12 {
         press(&window, Key::Tab);
     }
     press(&window, Key::RightArrow);

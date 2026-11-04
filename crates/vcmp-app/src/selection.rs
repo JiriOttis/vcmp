@@ -8,11 +8,13 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString};
 
 use crate::{AppWindow, SelectionChange, SongRow, SongSelection, TrackRow, TrackSelection};
 
-/// A row that can be selected and names its file.
+/// A row that can be selected and names its file and track.
 pub trait Selectable: Clone {
     fn selected(&self) -> bool;
     fn set_selected(&mut self, selected: bool);
     fn path(&self) -> &SharedString;
+    /// The library's id of the track; 0 when the row has none.
+    fn track_id(&self) -> i32;
 }
 
 impl Selectable for TrackRow {
@@ -25,6 +27,9 @@ impl Selectable for TrackRow {
     fn path(&self) -> &SharedString {
         &self.path
     }
+    fn track_id(&self) -> i32 {
+        self.track_id
+    }
 }
 
 impl Selectable for SongRow {
@@ -36,6 +41,9 @@ impl Selectable for SongRow {
     }
     fn path(&self) -> &SharedString {
         &self.path
+    }
+    fn track_id(&self) -> i32 {
+        self.track_id
     }
 }
 
@@ -96,6 +104,18 @@ pub fn chosen_paths<T: Selectable>(rows: &ModelRc<T>, index: i32) -> Vec<String>
         .into_iter()
         .filter_map(|n| rows.row_data(n))
         .map(|row| row.path().to_string())
+        .collect()
+}
+
+/// The track ids of the rows `chosen` picks.
+pub fn chosen_ids<T: Selectable>(rows: &ModelRc<T>, index: i32) -> Vec<i32> {
+    let Ok(index) = usize::try_from(index) else {
+        return Vec::new();
+    };
+    chosen(rows, index)
+        .into_iter()
+        .filter_map(|n| rows.row_data(n))
+        .map(|row| row.track_id())
         .collect()
 }
 

@@ -25,6 +25,9 @@ A player for the music files on your own drives, for Windows 10 and newer and Li
   Put them on tracks or whole albums from their menu, then filter the Songs and
   Albums pages by them or play a label's tracks. They stay in VCMP and never go into
   your files.
+- Favourites: like a track with the heart in a track list or the player bar, or a
+  whole album from its menu. Liked tracks gather in a Favourites playlist, first
+  among your playlists, newest first, which you can play, shuffle or export.
 - Finds missing album covers online (the Cover Art Archive, through MusicBrainz) and
   artist photos on fanart.tv. You can use your own pictures instead, and give
   playlists one too. An animated GIF, WebP or PNG plays on its album's, artist's or
