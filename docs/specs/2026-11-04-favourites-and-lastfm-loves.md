@@ -1,6 +1,6 @@
 # Favourites and Last.fm loves
 
-Status: draft
+Status: agreed
 Date: 2026-11-04
 Area: vcmp-library (schema, favourites queries, M3U export), vcmp-integrations (Last.fm
 love, unlove, loved tracks), vcmp-app (player bar, track lists, track menus,
