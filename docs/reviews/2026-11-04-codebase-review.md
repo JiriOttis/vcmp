@@ -30,11 +30,11 @@ a background thread), where the second copy was made by adapting the first.
 | 3 | Decoding an image into a Slint RGBA buffer, 7 times | 6 files | High |
 | 4 | Queue origin keys built and parsed in three places | 2 files | High (can drift) |
 | 5 | `play_*` methods repeat the shuffle and start logic, with different guards | 4 methods | Medium |
-| 6 | The weak-upgrade callback closure, 132 times | 20 files | Medium |
+| 6 | The weak-upgrade callback closure, 132 times | 21 files | Medium |
 | 7 | "Everything by an artist" assembled twice; artist page read twice | 2 crates | Medium |
 | 8 | Stored pictures: artist photo and playlist picture repeat each other | 3 library files | Medium |
 | 9 | MusicBrainz `search` and `candidates` repeat their query set-up | 1 file | Medium |
-| 10 | Boolean settings parsed and written by hand | 13 sites | Low |
+| 10 | Boolean settings parsed and written by hand | 14 sites | Low |
 | 11 | HTTP transports repeat the response tail; `USER_AGENT` lives in `musicbrainz` | 4 files | Low |
 | 12 | Four lists of image extensions that disagree | 4 files | Low |
 | 13 | Slint focus boilerplate on every pressable row | 12 files | Low |
@@ -267,8 +267,8 @@ stay in each method.
 
 ## 10. Boolean settings parsed and written by hand
 
-`"true"` / `"false"` settings are read and written at 13 sites:
-`vcmp-library/src/lib.rs:136-144`, `agents.rs:158`, `167`, `426`, `443`,
+`"true"` / `"false"` settings are read and written at 14 sites:
+`vcmp-library/src/lib.rs:139`, `143`, `agents.rs:158`, `167`, `426`, `443`,
 `agent_playback.rs:128`, `preferences.rs:44`, `46`, `89`, `player_service.rs:308`,
 `1860`, `vcmp-app/src/updates.rs:63`, `90`.
 
