@@ -348,6 +348,17 @@ CREATE TABLE change_labels (
     PRIMARY KEY (set_id, name)
 ) STRICT, WITHOUT ROWID;
 "#,
+    r#"
+-- Favourites: the tracks the owner liked, and when (Unix time). They point at tracks,
+-- which are never deleted, so a heart outlives its file going missing and follows
+-- a moved file, like a playlist entry.
+CREATE TABLE favourites (
+    track_id INTEGER PRIMARY KEY REFERENCES tracks(id),
+    liked_ms INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX favourites_liked ON favourites(liked_ms);
+"#,
 ];
 
 pub(crate) const VERSION: i64 = MIGRATIONS.len() as i64;

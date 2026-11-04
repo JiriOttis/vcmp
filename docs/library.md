@@ -28,7 +28,8 @@ instead, because nothing could rebuild them. The database runs in
 WAL mode, so one connection can scan while others read. Open one `Library` per
 thread.
 
-Labels (see [Labels](#labels)) live in the database only and never touch a file.
+Labels (see [Labels](#labels)) and favourites (see [Favourites](#favourites)) live in
+the database only and never touch a file.
 
 Music files are only read, except by `Library::write_tags`, the tag editor's write
 path (see [Writing tags](#writing-tags)), and `Library::accept_change_set` (see
@@ -36,7 +37,7 @@ path (see [Writing tags](#writing-tags)), and `Library::accept_change_set` (see
 
 ## Schema
 
-Version 12, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
+Version 13, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
 migrations; a database from a newer build is refused instead of being altered.
 Migrations run with foreign keys off (`Library::open` turns them on afterwards), so
 a migration that rebuilds a table, as version 12 rebuilds `change_sets` to widen
@@ -65,6 +66,7 @@ the CHECK on its kind, doesn't delete the rows that refer to it.
 | `labels` | The owner's labels: name (unique, case-insensitive), colour (`palette:` and a name, or `#rrggbb`), when made (version 12; see [Labels](#labels)) |
 | `track_labels` | Which track holds which label, and since when; deleting a label deletes its rows (version 12) |
 | `change_labels` | The labels a label set creates when accepted, and whether it did or found one of that name (version 12) |
+| `favourites` | The tracks the owner liked, one row each, and when (version 13; see [Favourites](#favourites)) |
 
 Paths are stored as platform-native bytes (`src/path_codec.rs`), so file names that
 aren't valid UTF-8 keep working.
@@ -513,6 +515,25 @@ The agreed decisions are in the [labels spec](specs/2026-10-28-user-labels.md).
   `album_labels` (for each album the labels any of its available tracks hold, for
   the album filter), `tracks_with_labels` (tracks holding every label given, for
   agents).
+
+## Favourites
+
+`src/favourites.rs`. The tracks the owner liked, with when, kept in the database
+only. The agreed decisions are in the
+[favourites spec](specs/2026-11-04-favourites-and-lastfm-loves.md).
+
+- **Its own table, not a playlist.** `favourites` holds a track id and the time it
+  was liked, so no playlist operation needs to guard against it. The window draws it
+  as a playlist ([ui.md](ui.md#playlists)).
+- **Likes outlive files**, like playlist entries and labels: a heart stays on a track
+  whose file is gone and follows a re-linked file (a test checks both).
+- **Liking** (`Library::like`) a set of tracks happens in one transaction; a track
+  liked already keeps the time it was first liked. `unlike` takes tracks out.
+- **Reads:** `liked_tracks` (the set, for the hearts rows show), `favourites` (newest
+  first, unavailable tracks included; tracks liked together keep their album order)
+  and `favourites_summary` (count, available count, duration, for the card).
+- **M3U export:** `Library::export_favourites` writes them newest first through the
+  same writer as `export_playlist`.
 
 ## Measured
 
