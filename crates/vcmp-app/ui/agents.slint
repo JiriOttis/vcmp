@@ -242,6 +242,20 @@ global AgentWords {
     }
 }
 
+// The switch that lets agents in, in Settings and in the setup wizard.
+export component AgentsSwitchRow inherits SettingRow {
+    title: @tr("Let AI agents use your library");
+    description: @tr("While VCMP is open, agents that speak MCP, such as Claude, can read your library and edit playlists. Changes to tags and deleting a playlist wait for your review.");
+
+    Toggle {
+        label: @tr("Let AI agents use your library");
+        checked: AgentState.enabled;
+        toggled(on) => {
+            AgentState.set-enabled(on);
+        }
+    }
+}
+
 // The AI agents section of Settings: the switch, how to connect while it is on and
 // whether agents may control playback then, the changes agents asked for, and the
 // backups that keep them undoable.
@@ -255,18 +269,7 @@ export component AgentsSection inherits VerticalLayout {
         text: @tr("AI agents");
     }
 
-    SettingRow {
-        title: @tr("Let AI agents use your library");
-        description: @tr("While VCMP is open, agents that speak MCP, such as Claude, can read your library and edit playlists. Changes to tags and deleting a playlist wait for your review.");
-
-        Toggle {
-            label: @tr("Let AI agents use your library");
-            checked: AgentState.enabled;
-            toggled(on) => {
-                AgentState.set-enabled(on);
-            }
-        }
-    }
+    AgentsSwitchRow { }
 
     // How an agent connects, while the switch is on.
     if AgentState.enabled: VerticalLayout {

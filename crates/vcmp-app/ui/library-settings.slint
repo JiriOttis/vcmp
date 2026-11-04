@@ -99,11 +99,14 @@ export component AddFolderButton inherits HorizontalLayout {
 }
 
 export component LibrarySection inherits VerticalLayout {
+    // Off in the setup wizard, whose step already has the title.
+    in property <bool> heading: true;
     private property <bool> show-unreadable;
 
     spacing: Theme.space-xs;
+    forward-focus: add-folder;
 
-    SectionHeading {
+    if root.heading: SectionHeading {
         text: @tr("Music folders");
     }
 
@@ -124,7 +127,7 @@ export component LibrarySection inherits VerticalLayout {
         padding-top: Theme.space-s;
         alignment: start;
 
-        Button {
+        add-folder := Button {
             text: @tr("Add folder…");
             clicked => {
                 LibraryState.add-folder();

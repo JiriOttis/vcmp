@@ -114,6 +114,8 @@ export global Theme {
     out property <length> dialog-wide-width: 960px;
     // An "are you sure?": a question, a sentence or two and two buttons.
     out property <length> dialog-narrow-width: 480px;
+    // The setup wizard keeps this height on every step, less in a shorter window.
+    out property <length> dialog-setup-height: 640px;
 
     out property <duration> duration-fast: root.reduced-motion ? 0ms : 120ms;
     out property <duration> duration-medium: root.reduced-motion ? 0ms : 220ms;

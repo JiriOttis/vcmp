@@ -40,7 +40,7 @@ A player for the music files on your own drives, for Windows 10 and newer and Li
 
 ## Download
 
-Get VCMP from [ShitHub Releases](https://github.com/dalibor-osu/vcmp/releases).
+Get VCMP from [GitHub Releases](https://github.com/dalibor-osu/vcmp/releases).
 There is no installer yet: unpack the archive and run VCMP from where it is.
 
 | System | File | Then |
@@ -56,6 +56,14 @@ There are no downloads for other systems, such as macOS. VCMP can probably be bu
 and run on them, but you have to do that yourself (see
 [Build it yourself](#build-it-yourself)), and nobody tests it there.
 
+### The first start
+
+The first time VCMP opens, a short setup asks for your music folders, the theme,
+zoom and motion, and what VCMP may send online. Showing what you play on Discord
+and the update check are on unless you turn them off there. Every choice is in
+Settings too, and "Run setup again" at the top of Settings opens the setup again.
+Libraries that already have music folders don't see it after an update.
+
 ### The first start on Windows
 
 VCMP isn't code-signed yet, so Windows can't tell who made it and says "Windows
@@ -66,7 +74,7 @@ Run anyway.
 
 A version is the date of its release: 26.10.0 is the first release of October 2026,
 26.10.1 a fix later that month and 26.11.0 the release in November. Releases marked
-as pre-releases on ShitHub are for trying out, and VCMP's update check doesn't
+as pre-releases on GitHub are for trying out, and VCMP's update check doesn't
 offer them.
 
 ## AI agents

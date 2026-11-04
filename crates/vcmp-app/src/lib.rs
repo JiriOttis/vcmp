@@ -19,6 +19,7 @@ pub mod playlists;
 pub mod preferences;
 pub mod saved_queue;
 pub mod selection;
+pub mod setup;
 pub mod shortcuts;
 pub mod tag_editor;
 pub mod theme;

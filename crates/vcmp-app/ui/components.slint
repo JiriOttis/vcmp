@@ -1137,6 +1137,9 @@ export component Modal inherits Rectangle {
     // As tall as the room allows from the start, for content that arrives while the
     // dialog shows, so the card doesn't grow under the pointer.
     in property <bool> tall;
+    // With `tall`, never taller than this: one size for content that changes, such
+    // as the setup wizard's steps.
+    in property <length> tall-limit: root.room;
     out property <length> shown-width: card.width;
     // Escape, wherever the focus is in the dialog.
     callback escape();
@@ -1181,7 +1184,7 @@ export component Modal inherits Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             width: min(root.card-width, root.width - 2 * Theme.space-xxl);
-            height: root.tall ? root.room : min(content.preferred-height, root.room);
+            height: root.tall ? min(root.tall-limit, root.room) : min(content.preferred-height, root.room);
             border-radius: Theme.radius-l;
             border-width: 1px;
             border-color: Theme.colors.surface;

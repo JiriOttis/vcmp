@@ -14,7 +14,10 @@ DESIGN.md).
 | File | Holds |
 |---|---|
 | `ui/theme.slint` | `ThemePalette` struct, `ThemeMode` and `ReduceMotion` enums, `Theme` global: colours, spacing, radii, type sizes, target height, content, column and dialog widths, the detail pages' cover size, the zoom, durations, drag scrolling |
-| `ui/components.slint` | `FocusRing`, `MenuHost` (see "Menus over lists"), `ScrollArea` (every scrolling part but the album grid and the songs table, without a scroll bar), `EdgeScroll`, `NavItem`, `PlaylistLink`, `SegmentedChoice`, `Toggle`, `SettingRow`, `Button`, `IconButton`, `Dropdown`, `SearchField`, `TextField`, `ProgressBar`, `Modal` (the dialog frame of the tag editor, the pickers and the confirmation) |
+| `ui/components.slint` | `FocusRing`, `MenuHost` (see "Menus over lists"), `ScrollArea` (every scrolling part but the album grid and the songs table, without a scroll bar), `EdgeScroll`, `NavItem`, `PlaylistLink`, `SegmentedChoice`, `Toggle`, `SettingRow`, `Button`, `IconButton`, `Dropdown`, `SearchField`, `TextField`, `ProgressBar`, `Modal` (the dialog frame of the tag editor, the pickers, the confirmation and the setup wizard) |
+| `ui/setup.slint` | `Setup` global and `SetupWizard`: the first-run setup wizard (see "Setup wizard") |
+| `src/setup.rs` | Whether the wizard opens at the start, and its `ui.setup_done` flag |
+| `ui/setting-rows.slint` | `DiscordRow`, `ThemeRow`, `ZoomRow`, `MotionRow`: Settings rows the setup wizard shows too |
 | `ui/confirmation.slint` | `Confirmation` global and `ConfirmDialog`: the "are you sure?" before deleting a playlist, a label or the agents' backups |
 | `ui/icons.slint` | The `Glyph` names, the `IconArt` global and `Icon` |
 | `ui/pages.slint` | `SearchPage`, `AlbumsPage`, `ArtistsPage`, `PlaylistsPage`, `SongsPage`, `FoldersPage`, `SettingsPage`, `AboutPage` and their shared page frame |
@@ -41,7 +44,7 @@ DESIGN.md).
 | `src/albums.rs` | `CoverGrid`: a card grid's model with background picture loading, used by `AlbumBrowser` (the album grid), the artist and playlist grids, an artist's albums and search |
 | `src/library_view.rs` | Connects the library to the album and artist grids, search and the songs table, and opens album and artist pages; owns the folder and playlist browsers |
 | `ui/library-state.slint` | `LibraryState` global: music folders, scan progress and results |
-| `ui/library-settings.slint` | The Music folders section of Settings |
+| `ui/library-settings.slint` | The Music folders section of Settings, shown in the setup wizard too |
 | `src/library_service.rs` | `LibraryService`: folders, background scans, automatic updates |
 | `ui/player-state.slint` | `PlayerState` global: the current track, position, volume, shuffle, repeat |
 | `ui/player-bar.slint` | `PlayerBar`, its play button and the `Slider` |
@@ -55,8 +58,8 @@ DESIGN.md).
 | `ui/lastfm-settings.slint` | `LastfmRow`: the Last.fm setting and its Connect, Cancel or Disconnect button |
 | `src/lastfm_service.rs` | `LastfmService`: the Last.fm row, the account, and plays into the scrobble queue |
 | `ui/app-window.slint` | `AppWindow`: sidebar, current-page marker, content area |
-| `ui/updates.slint` | `UpdateState` global, `UpdateLink`, the sidebar's update note and the Updates section of Settings |
-| `ui/agents.slint` | `AgentState` global, the AI agents section of Settings (switch, connection, the playback switch, backups), `ChangeHistory` (the dialog listing the changes by agents), the sidebar's review note and `ChangeReview`, the dialog that reviews a change, with `ChangeTable` for each file's changes |
+| `ui/updates.slint` | `UpdateState` global, `UpdateLink`, the sidebar's update note, `UpdateCheckRow` and the Updates section of Settings |
+| `ui/agents.slint` | `AgentState` global, `AgentsSwitchRow`, the AI agents section of Settings (switch, connection, the playback switch, backups), `ChangeHistory` (the dialog listing the changes by agents), the sidebar's review note and `ChangeReview`, the dialog that reviews a change, with `ChangeTable` for each file's changes |
 | `src/agents.rs` | `AgentService`: the switch and the MCP server (`vcmp-mcp`), the history, the review (accepting writes in the background like the tag editor), undo, the backups, and the upkeep at start and daily; `AppChanges` brings agents' requests from the server's thread; `AppPlayback` (`src/player_service/agent_playback.rs`) brings their playback requests to `PlayerService` |
 | `src/updates.rs` | The update check's switch, saved in the settings, and the newer release it found |
 | `ui/labels.slint` | `Labels` global, `LabelEntry`, `LabelDot`, `LabelChip(s)`, `LabelFilter` (the Songs and Albums pages' label filter), `LabelEditor` (the dialog that makes or edits a label, with the palette and the custom colour picker) and the Labels section of Settings |
@@ -949,6 +952,39 @@ ways of tinting inside Slint misdrew small glyphs with the GPU renderer:
 - The switch is saved as `integrations.update_check` ("false" when off; absent
   means on). Turning it on checks at once, at most once per run; turning it off
   hides a note already shown.
+- When the setup wizard opens at the start, the check waits until it closes
+  (`updates::connect_held`), and runs then only if the switch is still on: nothing
+  goes to GitHub before the user has seen the choice.
+
+## Setup wizard
+
+The first-run wizard ([spec](specs/2026-11-03-first-run-setup-wizard.md)):
+`SetupWizard`, a `Modal` over the sidebar and pages, opened through the `Setup`
+global. The player bar stays usable, as with the other dialogs.
+
+- **When it opens** (`src/setup.rs`, run only by `main.rs`, so tests and examples
+  never meet it): with the database open, no `ui.setup_done` and no music folder.
+  The flag is written as the wizard shows, so quitting halfway counts as seen. A
+  library that has a music folder gets the flag silently. Without a database, or
+  with `VCMP_SETUP=skip` (which writes nothing), it doesn't open. After that only
+  "Run setup again", the first row of Settings, opens it.
+- **Steps:** Welcome, Music folders (`LibrarySection` without its heading), Look
+  (theme, zoom, reduce motion), Online services (Show on Discord, Last.fm, the
+  update check, the fanart.tv key, each only in builds that have it, and the AI
+  agents switch), Done (the scan's state and where everything is). The rows are
+  Settings' own components on the same globals, so every choice applies and saves
+  at once, leaving early keeps it, and a rerun shows the current values. With
+  agents on, a line points to Settings for the token and setup commands.
+- **One size:** the card is as tall as `Theme.dialog-setup-height` allows, less in
+  a shorter window, so it doesn't jump between steps. A step that doesn't fit
+  scrolls above the buttons, with a line over them while it does.
+- **Leaving:** Skip setup and Escape ask first through `Confirmation` ("Close the
+  setup?"); Cancel stays on the step. On Done, Close and Escape close without
+  asking. A click beside the card does nothing. The same rules apply to a rerun.
+- **Focus:** it starts on Next; each step hands it to its first control as it
+  opens (the folder step to Add folder…). Tab and Shift+Tab go round the dialog
+  (see "Accessibility patterns"); Back is disabled on Welcome, so Tab skips it
+  there. Closing a rerun puts the focus back on Run setup again….
 
 ## Accessibility patterns
 

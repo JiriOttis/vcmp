@@ -17,6 +17,23 @@ pub const SETTING_UPDATE_CHECK: &str = "integrations.update_check";
 /// Asks for a newer release; given the window to show it in.
 type Check = Box<dyn FnOnce(slint::Weak<AppWindow>)>;
 
+/// A check that waits, while the setup wizard is open on the first start, until
+/// [`HeldCheck::release`]: nothing goes to GitHub before the user has seen the switch.
+pub struct HeldCheck {
+    held: Rc<Cell<bool>>,
+    run: Rc<dyn Fn(&AppWindow)>,
+}
+
+impl HeldCheck {
+    /// Lets the check run: now if the switch is still on, or when it is turned on.
+    pub fn release(&self, window: &AppWindow) {
+        self.held.set(false);
+        if window.global::<UpdateState>().get_check_enabled() {
+            (self.run)(window);
+        }
+    }
+}
+
 /// Applies the saved switch and saves it when the user flips it. `check` runs once
 /// at most: now if the switch is on, or later when the user turns it on. Without a
 /// database the switch lasts for the session.
@@ -25,6 +42,17 @@ pub fn connect(
     library: Option<Rc<Library>>,
     check: impl FnOnce(slint::Weak<AppWindow>) + 'static,
 ) {
+    connect_held(window, library, false, check);
+}
+
+/// As [`connect`], but with `held` the check waits for the returned
+/// [`HeldCheck::release`], even with the switch on.
+pub fn connect_held(
+    window: &AppWindow,
+    library: Option<Rc<Library>>,
+    held: bool,
+    check: impl FnOnce(slint::Weak<AppWindow>) + 'static,
+) -> HeldCheck {
     let saved = library.as_ref().and_then(|library| {
         library
             .setting(SETTING_UPDATE_CHECK)
@@ -37,15 +65,23 @@ pub fn connect(
     state.set_check_enabled(enabled);
 
     let pending: Rc<Cell<Option<Check>>> = Rc::new(Cell::new(Some(Box::new(check))));
-    let run = move |window: &AppWindow| {
-        if let Some(check) = pending.take() {
-            check(window.as_weak());
+    let held = Rc::new(Cell::new(held));
+    let run: Rc<dyn Fn(&AppWindow)> = Rc::new({
+        let held = held.clone();
+        move |window: &AppWindow| {
+            if held.get() {
+                return;
+            }
+            if let Some(check) = pending.take() {
+                check(window.as_weak());
+            }
         }
-    };
+    });
     if enabled {
         run(window);
     }
     let weak = window.as_weak();
+    let switched = run.clone();
     state.on_set_check_enabled(move |on| {
         let Some(window) = weak.upgrade() else { return };
         window.global::<UpdateState>().set_check_enabled(on);
@@ -56,9 +92,10 @@ pub fn connect(
             log::warn!("could not save the update check setting: {error}");
         }
         if on {
-            run(&window);
+            switched(&window);
         }
     });
+    HeldCheck { held, run }
 }
 
 /// Asks GitHub on a worker thread and shows a newer release in the window. The check

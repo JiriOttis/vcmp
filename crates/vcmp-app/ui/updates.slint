@@ -45,6 +45,21 @@ export component SidebarUpdateNote inherits VerticalLayout {
     }
 }
 
+// The update check's switch, in Settings and in the setup wizard.
+export component UpdateCheckRow inherits SettingRow {
+    title: @tr("Check for updates");
+    description: @tr("When VCMP starts, it asks github.com whether a newer version is out and links to it in the sidebar. GitHub learns your IP address, nothing about your music.");
+    forward-focus: toggle;
+
+    toggle := Toggle {
+        label: @tr("Check for updates");
+        checked: UpdateState.check-enabled;
+        toggled(on) => {
+            UpdateState.set-check-enabled(on);
+        }
+    }
+}
+
 // The Updates section of Settings.
 export component UpdatesSection inherits VerticalLayout {
     spacing: Theme.space-xs;
@@ -53,16 +68,5 @@ export component UpdatesSection inherits VerticalLayout {
         text: @tr("Updates");
     }
 
-    SettingRow {
-        title: @tr("Check for updates");
-        description: @tr("When VCMP starts, it asks github.com whether a newer version is out and links to it in the sidebar. GitHub learns your IP address, nothing about your music.");
-
-        Toggle {
-            label: @tr("Check for updates");
-            checked: UpdateState.check-enabled;
-            toggled(on) => {
-                UpdateState.set-check-enabled(on);
-            }
-        }
-    }
+    UpdateCheckRow { }
 }

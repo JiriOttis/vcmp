@@ -32,7 +32,7 @@ use vcmp_app::{
     AgentState, AlbumTile, AppWindow, ArtworkState, ChangeEntry, ChangeField, ChangeGroup,
     ChangeKind, ChangeProblem, ChangeRow, ChangeStatus, Confirmation, CoverSearch as CoverPicker,
     CoverSearchStatus, LastfmState, LastfmStatus, PhotoSearch, PhotoSearchStatus, PlayerState,
-    ReduceMotion, ReviewStatus, SelectionChange, ServerStatus, SleepTimer, TagChange,
+    ReduceMotion, ReviewStatus, SelectionChange, ServerStatus, Setup, SleepTimer, TagChange,
     TagEditorState, TagEditorStatus, TagField, Theme, ThemeMode, TrackSelection, UpdateState,
 };
 use vcmp_integrations::discord::Listening;
@@ -79,6 +79,8 @@ struct Shot {
     confirm: bool,
     // The pointer rests at the queue panel's right edge, where a scroll bar would show.
     queue_edge: bool,
+    // The setup wizard is open on this step (0 Welcome to 4 Done).
+    setup: Option<i32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -117,6 +119,7 @@ const fn shot(
         sleep: false,
         confirm: false,
         queue_edge: false,
+        setup: None,
     }
 }
 
@@ -218,6 +221,15 @@ const fn queue_edge(name: &'static str, mode: ThemeMode) -> Shot {
     }
 }
 
+/// The setup wizard over the Albums page, as in a build with Last.fm.
+const fn setup(name: &'static str, mode: ThemeMode, step: i32) -> Shot {
+    Shot {
+        setup: Some(step),
+        lastfm: Some(LastfmStatus::Disconnected),
+        ..shot(name, mode, 1, None, 0)
+    }
+}
+
 const fn cover_picker(name: &'static str, mode: ThemeMode) -> Shot {
     Shot {
         cover_picker: true,
@@ -302,6 +314,16 @@ const SHOTS: &[Shot] = &[
     ),
     confirm("confirm-dialog-light", ThemeMode::Light),
     confirm("confirm-dialog-dark", ThemeMode::Dark),
+    setup("setup-welcome-light", ThemeMode::Light, 0),
+    setup("setup-welcome-dark", ThemeMode::Dark, 0),
+    setup("setup-folders-light", ThemeMode::Light, 1),
+    setup("setup-folders-dark", ThemeMode::Dark, 1),
+    setup("setup-look-light", ThemeMode::Light, 2),
+    setup("setup-look-dark", ThemeMode::Dark, 2),
+    setup("setup-online-light", ThemeMode::Light, 3),
+    setup("setup-online-dark", ThemeMode::Dark, 3),
+    setup("setup-done-light", ThemeMode::Light, 4),
+    setup("setup-done-dark", ThemeMode::Dark, 4),
 ];
 
 /// Grid position of the artist the artist shots open (set `VCMP_SHOT_ARTIST` to pick
@@ -465,6 +487,14 @@ fn prepare(window: &AppWindow, shot: &Shot) {
     // The album shots show the queue panel too.
     window.set_queue_open(shot.album.is_some() && !shot.tags);
     show_agents(window, shot.agents);
+    let wizard = window.global::<Setup>();
+    match shot.setup {
+        Some(step) => {
+            wizard.invoke_start();
+            wizard.invoke_go_to(step);
+        }
+        None => wizard.invoke_close(),
+    }
     if shot.confirm {
         // The words Settings uses for the backups; Cancel answers before the next shot.
         window.global::<Confirmation>().invoke_ask(

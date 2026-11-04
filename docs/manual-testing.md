@@ -33,6 +33,26 @@ reading the code or with a simulated system, so they are the most likely to fail
 
 ## Every platform
 
+### First start (setup wizard)
+
+Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcmp-app`
+(delete the directory to see it again).
+
+- [ ] The setup opens over the Albums page on Welcome; the player bar still works.
+- [ ] Music folders: Add folder… opens the system's folder dialog over the setup;
+      after choosing a folder, the scan runs and albums fill the page behind it.
+- [ ] Look: the theme, zoom and reduce motion change the window behind the dialog
+      at once; a large zoom keeps the buttons in view and the step scrolls.
+- [ ] Online services (a build with the keys): Connect… opens Last.fm in the
+      browser and the row waits; Show on Discord shows only in builds with Discord.
+- [ ] Escape and Skip setup ask "Close the setup?"; Cancel stays on the step.
+- [ ] Quit while the setup is open and start again: it doesn't come back.
+- [ ] No request to github.com while the setup is open (check with the update note:
+      it shows only after the setup closes, if a newer release exists).
+- [ ] Settings, Run setup again…: opens on Welcome with the current values;
+      closing it puts the focus back on the button.
+- [ ] An existing library (with folders) updated to this version: no setup.
+
 ### Library
 
 - [ ] Add a music folder: albums appear while the scan runs, with progress in
