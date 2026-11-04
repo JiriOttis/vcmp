@@ -16,6 +16,7 @@ import { FolderBrowser, FolderRow } from "folders-page.slint";
 import { UpdateLink, UpdatesSection, UpdateState } from "updates.slint";
 import { PictureSlot } from "picture.slint";
 import { PlaylistDetail, PlaylistView } from "playlist-page.slint";
+import { Playlists } from "playlist-state.slint";
 import { PhotoKeyRow, PhotoSearch } from "photo-picker.slint";
 import { AgentsSection } from "agents.slint";
 import { LabelFilter, LabelFilterPage, Labels, LabelsSection } from "labels.slint";
@@ -699,7 +700,8 @@ export component ArtistsPage inherits Rectangle {
     if root.shown && !root.artist-open: FadeCurtain { }
 }
 
-// The playlists as a grid, and one playlist instead of it while open.
+// The playlists as a grid, Favourites first, and one playlist instead of it while
+// open.
 export component PlaylistsPage inherits Rectangle {
     in property <[AlbumTile]> playlists;
     in property <bool> shown;
@@ -764,14 +766,16 @@ export component PlaylistsPage inherits Rectangle {
             if !root.library-failed: Button {
                 text: @tr("New playlist");
                 clicked => {
-                    root.create(@tr("Playlist {}", root.playlists.length + 1));
+                    root.create(Playlists.new-name);
                     view.start-rename();
                 }
             }
         }
 
-        if root.playlists.length == 0: VerticalLayout {
+        // Favourites alone, or nothing when the library failed: says how to make one.
+        if root.playlists.length <= 1: VerticalLayout {
             padding: Theme.space-xxl;
+            padding-top: 0;
             alignment: start;
 
             Text {

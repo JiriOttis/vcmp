@@ -3,8 +3,8 @@
 //! crate.
 //!
 //! The database is a cache of the files' tags (the files are the source of truth) plus
-//! what only VCMP knows: source directories, settings, labels, the plays waiting for
-//! Last.fm and the change sets AI agents asked for. Music files are written only by
+//! what only VCMP knows: source directories, settings, labels, favourites, the plays
+//! waiting for Last.fm and the change sets AI agents asked for. Music files are written only by
 //! [`Library::write_tags`] and [`Library::accept_change_set`], through a verified
 //! copy.
 
@@ -14,6 +14,7 @@ mod artwork;
 mod changes;
 mod edit;
 mod error;
+mod favourites;
 mod labels;
 mod lookups;
 mod m3u;
@@ -39,6 +40,7 @@ pub use changes::{
 };
 pub use edit::{FieldEdit, InvalidTagEdit, TagEdit, TagField, TagWriteError};
 pub use error::{Error, Result};
+pub use favourites::{Favourite, FavouritesSummary};
 pub use labels::{LABEL_NAME_MAX, LABEL_PALETTE, Label, LabelId, valid_label_colour};
 pub use lookups::{CoverArtId, CoverLookup};
 pub use m3u::{M3uExport, m3u_file_name};

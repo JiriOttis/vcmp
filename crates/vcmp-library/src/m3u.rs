@@ -69,6 +69,17 @@ impl Library {
             .collect();
         write(file, &tracks)
     }
+
+    /// Writes the favourites, newest first and unavailable ones included, to `file`
+    /// as an M3U file, like [`Library::export_playlist`].
+    pub fn export_favourites(&self, file: &Path) -> Result<M3uExport> {
+        let tracks: Vec<Track> = self
+            .favourites()?
+            .into_iter()
+            .map(|favourite| favourite.track)
+            .collect();
+        write(file, &tracks)
+    }
 }
 
 fn write(file: &Path, tracks: &[Track]) -> Result<M3uExport> {

@@ -7,6 +7,7 @@ import { TagEditorState } from "tag-editor.slint";
 import { SelectionChange } from "selection.slint";
 import { ColumnEdge, ColumnWidths } from "columns.slint";
 import { LabelChips, LabelEntry, LabelWords, Labels } from "labels.slint";
+import { Favourites } from "favourites.slint";
 
 export enum SongColumn { title, artist, album, year, duration }
 
@@ -24,6 +25,10 @@ export struct SongRow {
     selected: bool,
     // The track's labels, by name.
     labels: [LabelEntry],
+    // The library's id of the track.
+    track-id: int,
+    // The track is among the favourites; the table has no hearts, its menu says.
+    liked: bool,
 }
 
 // The selection in the songs table, kept in its rows, as `TrackSelection` does for
@@ -35,6 +40,8 @@ export global SongSelection {
     callback prepare-labels([SongRow], int);
     callback toggle-label([SongRow], int, int);
     callback new-label([SongRow], int);
+    callback prepare-favourites([SongRow], int);
+    callback toggle-favourites([SongRow], int);
 }
 
 // The width of the Labels column, there while any label exists.
@@ -372,6 +379,7 @@ export component SongTable {
         }
         root.current = index;
         SongSelection.prepare-labels(root.songs, index);
+        SongSelection.prepare-favourites(root.songs, index);
         menu.show({ x: x - menu.absolute-position.x, y: y - menu.absolute-position.y });
     }
 
@@ -525,6 +533,12 @@ export component SongTable {
                             root.queue(root.current, false);
                         }
                     }
+                    MenuItem {
+                        title: Favourites.entry(Favourites.menu-removes);
+                        activated => {
+                            SongSelection.toggle-favourites(root.songs, root.current);
+                        }
+                    }
                     Menu {
                         title: @tr("Add to playlist");
 
@@ -604,8 +618,10 @@ export component SongTable {
                         } else if event.text == Key.Return || event.text == Key.Space {
                             root.play(root.current);
                         } else if event.text == Key.Menu || (event.modifiers.shift && event.text == Key.F10) {
-                            // The menu opens on its own; it needs the current labels first.
+                            // The menu opens on its own; it needs the current labels
+                            // and favourites first.
                             SongSelection.prepare-labels(root.songs, root.current);
+                            SongSelection.prepare-favourites(root.songs, root.current);
                             return reject;
                         } else {
                             return reject;

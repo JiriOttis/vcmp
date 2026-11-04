@@ -235,6 +235,35 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
 - [ ] Edit… renames and recolours; a taken name says so. Delete… asks in a dialog,
       saying how many tracks lose it; Escape gives the focus back to Delete….
 
+### Favourites
+
+- [ ] Fresh `VCMP_HOME`: the sidebar lists Favourites first under Playlists, and the
+      Playlists grid shows its heart card first, in the light and the dark theme.
+      Opened, it says how to like a track.
+- [ ] Hover a track on an album page: an outline heart shows between the title and
+      the time. Click it: it fills in the accent and stays; nothing plays and the row
+      isn't selected. The same track's row on the artist page, in Search and in the
+      Folders page shows the filled heart too, and the Favourites card counts 1.
+- [ ] Play the track: the player bar's heart is filled. Click it: every heart of
+      that track empties at once. Tab to it: it has a focus ring, Space toggles it.
+- [ ] Right-click a track → Add to Favourites; select two tracks, one liked: the
+      menu says Add, and adds the other; again it says Remove from Favourites and
+      takes both out. Do the same in the Songs table, the queue panel and the now
+      playing "…" menu, and with the Menu key and Shift+F10.
+- [ ] Right-click an album card (Albums, an artist's albums, Search) and open an
+      album page's three-dot menu → Add to Favourites: every track of the album is
+      liked; with all liked the entry says Remove from Favourites.
+- [ ] Open Favourites: newest first, an album liked at once in its own order. Its
+      More menu has only Export…; tracks can't be dragged and Alt+Up does nothing.
+      Play and Shuffle play it; the queue panel says "Next from Favourites". Clicking
+      a heart there takes the track off the page at once. Export… suggests
+      "Favourites.m3u8".
+- [ ] Move a liked file to another music folder and rescan: it stays liked. Unplug
+      or rename away a liked file's folder: it stays in Favourites, dimmed, "File not
+      found", and comes back with the folder.
+- [ ] A 720 px wide window with a long title playing: the bar's heart and buttons
+      all stay inside.
+
 ### Covers and artist photos
 
 - [ ] An album page's More button ("…" beside Shuffle) opens a menu below it, by

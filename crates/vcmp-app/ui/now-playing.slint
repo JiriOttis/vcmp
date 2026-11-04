@@ -2,6 +2,7 @@ import { Theme } from "theme.slint";
 import { FocusRing, IconButton, TextLink } from "components.slint";
 import { Playlists } from "playlist-state.slint";
 import { Labels } from "labels.slint";
+import { Favourites } from "favourites.slint";
 import { Glyph } from "icons.slint";
 import { PlayerState } from "player-state.slint";
 import { MovingPicture, PictureSlot } from "picture.slint";
@@ -322,6 +323,12 @@ export component NowPlayingView inherits Rectangle {
             height: Theme.target-height;
 
             Menu {
+                if PlayerState.track-id > 0: MenuItem {
+                    title: Favourites.entry(PlayerState.liked);
+                    activated => {
+                        Favourites.toggle-track(PlayerState.track-id);
+                    }
+                }
                 Menu {
                     title: @tr("Add to playlist");
 

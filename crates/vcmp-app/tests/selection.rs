@@ -333,7 +333,7 @@ fn several_playlist_entries_are_removed_at_once() {
     app.view.reload();
     app.window.set_selected_index(3);
     assert_eq!(app.window.get_current_page(), Page::Playlists);
-    app.window.invoke_playlist_activated(0);
+    app.window.invoke_playlist_activated(1);
     mock_elapsed_time(Duration::ZERO);
 
     let rows = app.window.get_playlist_tracks();

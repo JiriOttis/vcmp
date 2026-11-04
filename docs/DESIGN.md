@@ -111,6 +111,12 @@ a plain placeholder (a "V" in Sora, the accent pink on the dark base,
   system title bar on Windows. VCMP draws its own minimise, maximise and close
   buttons instead of keeping Windows' bar in the theme's colours. macOS and Linux
   keep their system title bars.
+- 2026-11-04, favourites (chosen from offered options,
+  `docs/specs/2026-11-04-favourites-and-lastfm-loves.md`): a Favourites playlist is
+  pinned first in the sidebar's playlist list and the Playlists grid, shown always,
+  even with nothing liked. Its picture is a drawn heart, not covers. Album menus
+  have the favourites entry too, for all the album's tracks; a menu offers Remove
+  only when every track it acts on is liked.
 
 ## Awaiting the owner's review
 
@@ -133,3 +139,10 @@ the owner's until reviewed; keep, change or drop each.
   in the Tab order, like Windows' own; Alt+Space opens the window menu instead. The
   window drags by a 16 px strip along its top, clear of every page's controls, and
   by the sidebar down to its first section.
+- 2026-11-04, the hearts (issue #78): in track lists the heart sits between the
+  title and the time, an outline under the pointer and filled in the accent while
+  liked. In the player bar it is a round icon button right of the title and artist,
+  filled in the accent while liked. The Favourites picture is the accent heart on
+  the surface grey. The favourites entry comes right after Add to queue in track
+  menus and card menus, and first in the album page's More menu after the cover
+  entries.

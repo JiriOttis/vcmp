@@ -3,6 +3,7 @@ import { FocusRing, IconButton, TextLink } from "components.slint";
 import { Glyph, Icon } from "icons.slint";
 import { PlayerProblem, PlayerState, PlayState, Repeat, ScrobbleMark, Shuffle, SleepTimer } from "player-state.slint";
 import { LastfmState, LastfmStatus } from "lastfm-state.slint";
+import { Favourites } from "favourites.slint";
 
 // The play/pause button: the focal point of the bar, filled with the accent.
 component PlayButton {
@@ -443,6 +444,22 @@ export component PlayerBar inherits Rectangle {
                     color: Theme.colors.text;
                     font-size: Theme.font-small;
                     overflow: elide;
+                }
+            }
+
+            // Likes the playing track, or takes it out of the favourites. Within the
+            // section's minimum, so the bar still fits the smallest window.
+            if PlayerState.has-track && PlayerState.track-id > 0: VerticalLayout {
+                alignment: center;
+
+                IconButton {
+                    glyph: PlayerState.liked ? Glyph.heart-filled : Glyph.heart;
+                    label: @tr("In Favourites");
+                    checkable: true;
+                    active: PlayerState.liked;
+                    clicked => {
+                        Favourites.toggle-track(PlayerState.track-id);
+                    }
                 }
             }
         }

@@ -174,12 +174,13 @@ fn a_track_menu_adds_to_a_new_playlist_and_then_to_that_one() {
     assert_eq!(playlists.get_new_name(), "Playlist 2");
     playlists.invoke_add_track(0, app.path("1.flac"));
 
-    let tile = app.window.get_playlists().row_data(0).unwrap();
+    // After Favourites.
+    let tile = app.window.get_playlists().row_data(1).unwrap();
     assert_eq!((tile.title.as_str(), tile.track_count), ("Playlist 1", 2));
     let id = app.library.playlists().unwrap()[0].id;
     assert_eq!(app.entry_titles(id), ["Two", "One"], "added to the end");
     assert!(
-        app.window.get_playlists().row_count() == 1 && !app.window.get_playlist_open(),
+        app.window.get_playlists().row_count() == 2 && !app.window.get_playlist_open(),
         "the page stays where it was"
     );
 
@@ -189,7 +190,7 @@ fn a_track_menu_adds_to_a_new_playlist_and_then_to_that_one() {
     assert_eq!(app.window.get_current_page(), Page::Playlists);
     assert!(app.window.get_playlist_open());
     assert_eq!(app.window.get_playlist_detail().name, "Playlist 1");
-    assert_eq!(app.window.get_open_playlist_index(), 0);
+    assert_eq!(app.window.get_open_playlist_index(), 1);
 }
 
 #[test]
@@ -246,7 +247,7 @@ fn missing_files_stay_dimmed_and_playback_skips_them() {
     app.view.reload();
 
     app.open_page("Playlists");
-    app.window.invoke_playlist_activated(0);
+    app.window.invoke_playlist_activated(1);
     assert_eq!(
         app.rows(),
         [
@@ -300,7 +301,7 @@ fn an_export_says_where_it_went_and_what_was_missing() {
     scanner.scan(&AtomicBool::new(false), |_| {}).unwrap();
     app.view.reload();
     app.open_page("Playlists");
-    app.window.invoke_playlist_activated(0);
+    app.window.invoke_playlist_activated(1);
     assert_eq!(app.window.get_playlist_detail().exported_to, "");
 
     // A name without an M3U extension gets .m3u8.
@@ -343,7 +344,7 @@ fn an_export_says_where_it_went_and_what_was_missing() {
     // Another playlist opens without the message.
     app.library.create_playlist("Other").unwrap();
     app.view.reload();
-    app.window.invoke_playlist_activated(1);
+    app.window.invoke_playlist_activated(2);
     assert_eq!(app.window.get_playlist_detail().name, "Other");
     assert_eq!(app.window.get_playlist_detail().exported_to, "");
 }
@@ -362,7 +363,7 @@ fn entries_move_and_go_from_the_keyboard() {
     app.library.add_to_playlist(id, &ids).unwrap();
     app.view.reload();
     app.open_page("Playlists");
-    app.window.invoke_playlist_activated(0);
+    app.window.invoke_playlist_activated(1);
     mock_elapsed_time(Duration::ZERO);
 
     let in_list = |app: &App| {
@@ -407,13 +408,17 @@ fn deleting_a_playlist_keeps_its_tracks() {
     let one = app.library.tracks().unwrap()[0].id;
     app.library.add_to_playlist(id, &[one]).unwrap();
     app.view.reload();
-    app.window.invoke_playlist_activated(0);
+    app.window.invoke_playlist_activated(1);
     assert!(app.window.get_playlist_open());
 
     app.window.invoke_delete_playlist();
     assert!(!app.window.get_playlist_open());
     assert!(app.names().is_empty());
-    assert_eq!(app.window.get_playlists().row_count(), 0);
+    assert_eq!(
+        app.window.get_playlists().row_count(),
+        1,
+        "Favourites stays"
+    );
     assert_eq!(app.library.tracks().unwrap().len(), 3);
 }
 
@@ -502,7 +507,7 @@ fn entries_can_be_dragged_to_a_new_place() {
     app.library.add_to_playlist(id, &ids).unwrap();
     app.view.reload();
     app.open_page("Playlists");
-    app.window.invoke_playlist_activated(0);
+    app.window.invoke_playlist_activated(1);
     mock_elapsed_time(Duration::ZERO);
 
     let centre = |title: &str| {
@@ -581,7 +586,7 @@ fn a_drag_held_at_the_edge_scrolls_the_list() {
     }
     app.view.reload();
     app.open_page("Playlists");
-    app.window.invoke_playlist_activated(0);
+    app.window.invoke_playlist_activated(1);
     mock_elapsed_time(Duration::ZERO);
 
     let rows = |title: &str| -> Vec<ElementHandle> {

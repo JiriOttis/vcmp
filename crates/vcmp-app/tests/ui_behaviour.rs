@@ -124,11 +124,11 @@ fn everything_works_from_the_keyboard() {
     press(&window, Key::Return);
     assert_eq!(window.get_current_page(), Page::Settings);
 
-    // From the Settings entry: About, Run setup again, Add folder, Update
-    // automatically, the shuffle choice, the output device, then the theme choice.
-    // Without folders there is no Rescan button, and without a player service no
-    // Discord switch.
-    for _ in 0..7 {
+    // From the Settings entry: About, Favourites below the sections, Run setup again,
+    // Add folder, Update automatically, the shuffle choice, the output device, then
+    // the theme choice. Without folders there is no Rescan button, and without a
+    // player service no Discord switch.
+    for _ in 0..8 {
         press(&window, Key::Tab);
     }
     press(&window, Key::RightArrow);

@@ -14,9 +14,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use slint::ComponentHandle;
-use vcmp_library::{AlbumId, ArtistId, LabelId, PlaylistId};
+use vcmp_library::{AlbumId, ArtistId, LabelId};
 
 use crate::library_view::LibraryView;
+use crate::playlists::PlaylistKey;
 use crate::{AppWindow, Page};
 
 /// The most places kept behind.
@@ -30,7 +31,8 @@ pub enum Place {
     Artist(ArtistId),
     /// An album opened from an artist's page.
     ArtistAlbum(ArtistId, AlbumId),
-    Playlist(PlaylistId),
+    /// A playlist's page, or the favourites'.
+    Playlist(PlaylistKey),
     Label(LabelId),
 }
 
@@ -87,7 +89,7 @@ impl History {
                 Place::Artist(self.view.shown_artist_entry()?.id)
             }
             Page::Playlists if window.get_playlist_open() => {
-                Place::Playlist(self.view.playlists().shown()?.id)
+                Place::Playlist(self.view.playlists().shown()?.key)
             }
             Page::Labels if window.get_label_open() => Place::Label(self.view.labels().shown()?.id),
             other => Place::Section(other),

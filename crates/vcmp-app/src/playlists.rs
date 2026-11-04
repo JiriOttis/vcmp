@@ -1,6 +1,13 @@
 //! Playlists in the window: the Playlists page's grid, the playlist page, the list in
-//! the sidebar, the Add to playlist menus and exporting a playlist as an M3U file. Reloaded after every library change,
-//! since an entry dims while its file is gone and comes back with it.
+//! the sidebar, the Add to playlist menus and exporting a playlist as an M3U file.
+//! Reloaded after every library change, since an entry dims while its file is gone
+//! and comes back with it.
+//!
+//! The Favourites playlist (`crate::favourites`) is drawn as a playlist, first in the
+//! grid and the sidebar, but it is no playlist of the library: it can't be renamed,
+//! deleted, reordered or given a picture, and the Add to playlist menus don't list
+//! it. Places in the grid and the sidebar count from it; places in
+//! `Playlists.names`, which the menus use, count the owner's playlists alone.
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -8,17 +15,26 @@ use std::rc::Rc;
 
 use slint::{ComponentHandle, Image, ModelRc, SharedString, VecModel};
 use vcmp_library::{
-    Library, M3uExport, Playlist, PlaylistEntry, PlaylistId, Track, TrackId, animation,
-    m3u_file_name,
+    FavouritesSummary, Library, M3uExport, Playlist, PlaylistEntry, PlaylistId, Track, TrackId,
+    animation, m3u_file_name,
 };
 
 use crate::albums::{Card, CoverGrid, Grid, initial};
+use crate::favourites::{liked, row_id};
 use crate::library_view::format_duration;
 use crate::moving_pictures::{self, Picture};
 use crate::selection;
 use crate::{
-    AlbumTile, AppWindow, PlaylistDetail, Playlists, SongSelection, TrackRow, TrackSelection,
+    AlbumTile, AppWindow, Favourites, PlaylistDetail, Playlists, SongSelection, TrackRow,
+    TrackSelection,
 };
+
+/// A playlist the playlist page can show: the favourites, or one of the library's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaylistKey {
+    Favourites,
+    Playlist(PlaylistId),
+}
 
 /// Image files the picture chooser offers.
 const PICTURE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp"];
@@ -31,10 +47,12 @@ pub struct PlaylistBrowser {
     window: slint::Weak<AppWindow>,
     library: Rc<Library>,
     grid: Rc<CoverGrid>,
-    // Every playlist, in the grid's and the sidebar's order.
+    // Every playlist of the library, in the grid's and the sidebar's order, after
+    // Favourites.
     playlists: RefCell<Vec<Playlist>>,
-    // The playlist the playlist page shows (or showed last), and its entries.
-    open: Cell<Option<PlaylistId>>,
+    // The playlist the playlist page shows (or showed last), and its entries; the
+    // favourites' are numbered from 0, newest first.
+    open: Cell<Option<PlaylistKey>>,
     entries: RefCell<Vec<PlaylistEntry>>,
     // The last picture chosen for the open playlist could not be used.
     picture_failed: Cell<bool>,
@@ -53,7 +71,7 @@ struct Exported {
 
 /// The open playlist's entries, for playing it.
 pub struct OpenPlaylist {
-    pub id: PlaylistId,
+    pub key: PlaylistKey,
     pub entries: Vec<PlaylistEntry>,
 }
 
@@ -87,8 +105,8 @@ impl PlaylistBrowser {
             let Some(browser) = weak.upgrade() else {
                 return;
             };
-            if let Some(playlist) = browser.at(index) {
-                browser.open(playlist.id);
+            if let Some(key) = browser.key_at(index) {
+                browser.open(key);
             }
         });
         let weak = Rc::downgrade(&browser);
@@ -99,7 +117,7 @@ impl PlaylistBrowser {
             match browser.library.create_playlist(&name) {
                 Ok(id) => {
                     browser.reload();
-                    browser.open(id);
+                    browser.open(PlaylistKey::Playlist(id));
                 }
                 Err(error) => log::error!("could not make a playlist: {error}"),
             }
@@ -210,7 +228,13 @@ impl PlaylistBrowser {
             log::error!("could not read the playlists: {error}");
             Vec::new()
         });
-        self.grid.replace(cards(&playlists));
+        let favourites = self.library.favourites_summary().unwrap_or_else(|error| {
+            log::error!("could not read the favourites: {error}");
+            FavouritesSummary::default()
+        });
+        let mut grid = vec![favourites_card(&window, &favourites)];
+        grid.extend(cards(&playlists));
+        self.grid.replace(grid);
         let names: Vec<SharedString> = playlists
             .iter()
             .map(|playlist| playlist.name.as_str().into())
@@ -219,22 +243,27 @@ impl PlaylistBrowser {
             .global::<Playlists>()
             .set_names(ModelRc::new(VecModel::from(names)));
         *self.playlists.borrow_mut() = playlists;
-        if let Some(id) = self.open.get() {
-            self.show(&window, id);
+        if let Some(key) = self.open.get() {
+            self.show(&window, key);
         }
     }
 
+    /// The favourites changed: the Favourites card and, while it is open, its page.
+    pub fn favourites_changed(&self) {
+        self.reload();
+    }
+
     /// Opens a playlist on the Playlists page.
-    pub fn open(&self, id: PlaylistId) {
+    pub fn open(&self, key: PlaylistKey) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
-        if self.open.get() != Some(id) {
+        if self.open.get() != Some(key) {
             self.picture_failed.set(false);
             self.exported.take();
         }
-        self.open.set(Some(id));
-        self.show(&window, id);
+        self.open.set(Some(key));
+        self.show(&window, key);
         window.set_playlist_open(true);
     }
 
@@ -245,18 +274,105 @@ impl PlaylistBrowser {
             return None;
         }
         Some(OpenPlaylist {
-            id: self.open.get()?,
+            key: self.open.get()?,
             entries: self.entries.borrow().clone(),
         })
     }
 
+    /// The owner's playlist at `index` in `Playlists.names`.
     fn at(&self, index: i32) -> Option<Playlist> {
         let index = usize::try_from(index).ok()?;
         self.playlists.borrow().get(index).cloned()
     }
 
+    /// The playlist at `index` in the grid and the sidebar, Favourites first.
+    fn key_at(&self, index: i32) -> Option<PlaylistKey> {
+        match index {
+            0 => Some(PlaylistKey::Favourites),
+            index => self
+                .at(index - 1)
+                .map(|playlist| PlaylistKey::Playlist(playlist.id)),
+        }
+    }
+
     /// Fills the playlist page. A playlist that is gone closes it.
-    fn show(&self, window: &AppWindow, id: PlaylistId) {
+    fn show(&self, window: &AppWindow, key: PlaylistKey) {
+        match key {
+            PlaylistKey::Favourites => self.show_favourites(window),
+            PlaylistKey::Playlist(id) => self.show_playlist(window, id),
+        }
+    }
+
+    /// Fills the playlist page with the favourites, newest first.
+    fn show_favourites(&self, window: &AppWindow) {
+        let (favourites, failed) = match self.library.favourites() {
+            Ok(favourites) => (favourites, false),
+            Err(error) => {
+                log::error!("could not read the favourites: {error}");
+                (Vec::new(), true)
+            }
+        };
+        let entries: Vec<PlaylistEntry> = favourites
+            .into_iter()
+            .enumerate()
+            .map(|(position, favourite)| PlaylistEntry {
+                position: position as u32,
+                track: favourite.track,
+            })
+            .collect();
+        let available: Vec<&Track> = entries
+            .iter()
+            .map(|entry| &entry.track)
+            .filter(|track| track.available)
+            .collect();
+        let minutes = available
+            .iter()
+            .map(|track| track.duration)
+            .sum::<std::time::Duration>()
+            .as_secs()
+            .div_ceil(60);
+        let rows: Vec<TrackRow> = entries.iter().map(entry_row).collect();
+        let (exported_to, export_failed, export_missing, export_left_out) = self.export_report();
+        window.set_playlist_detail(PlaylistDetail {
+            favourites: true,
+            track_count: entries.len() as i32,
+            unavailable_count: (entries.len() - available.len()) as i32,
+            minutes: minutes as i32,
+            failed,
+            exported_to,
+            export_failed,
+            export_missing,
+            export_left_out,
+            ..PlaylistDetail::default()
+        });
+        moving_pictures::show(window, Picture::Playlist, None);
+        window.set_playlist_tracks(ModelRc::new(VecModel::from(rows)));
+        window.set_open_playlist_index(0);
+        *self.entries.borrow_mut() = entries;
+    }
+
+    /// What the open playlist's last export did, as its page says it: the file, and
+    /// whether writing it failed, how many entries' files were missing and how many
+    /// were left out.
+    fn export_report(&self) -> (SharedString, bool, i32, i32) {
+        let exported = self.exported.borrow();
+        let report = exported
+            .as_ref()
+            .and_then(|exported| exported.report.as_ref());
+        (
+            exported
+                .as_ref()
+                .map(|exported| exported.file.to_string_lossy().as_ref().into())
+                .unwrap_or_default(),
+            exported.is_some() && report.is_none(),
+            report.map_or(0, |report| report.missing as i32),
+            report.map_or(0, |report| report.left_out.len() as i32),
+        )
+    }
+
+    /// Fills the playlist page with one of the library's playlists. One that is gone
+    /// closes it.
+    fn show_playlist(&self, window: &AppWindow, id: PlaylistId) {
         let position = self
             .playlists
             .borrow()
@@ -282,11 +398,9 @@ impl PlaylistBrowser {
             .picture
             .as_ref()
             .and_then(|path| Image::load_from_path(path).ok());
-        let exported = self.exported.borrow();
-        let report = exported
-            .as_ref()
-            .and_then(|exported| exported.report.as_ref());
+        let (exported_to, export_failed, export_missing, export_left_out) = self.export_report();
         window.set_playlist_detail(PlaylistDetail {
+            favourites: false,
             name: playlist.name.as_str().into(),
             track_count: playlist.track_count as i32,
             unavailable_count: (playlist.track_count - playlist.available_count) as i32,
@@ -298,13 +412,10 @@ impl PlaylistBrowser {
             initial: initial(&playlist.name).into(),
             failed,
             picture_failed: self.picture_failed.get(),
-            exported_to: exported
-                .as_ref()
-                .map(|exported| exported.file.to_string_lossy().as_ref().into())
-                .unwrap_or_default(),
-            export_failed: exported.is_some() && report.is_none(),
-            export_missing: report.map_or(0, |report| report.missing as i32),
-            export_left_out: report.map_or(0, |report| report.left_out.len() as i32),
+            exported_to,
+            export_failed,
+            export_missing,
+            export_left_out,
         });
         // Only the owner's own picture may move, not one made from covers.
         let animation = playlist
@@ -314,17 +425,19 @@ impl PlaylistBrowser {
             .and_then(animation::beside);
         moving_pictures::show(window, Picture::Playlist, animation);
         window.set_playlist_tracks(ModelRc::new(VecModel::from(rows)));
-        window.set_open_playlist_index(position.map_or(-1, |position| position as i32));
+        // After Favourites.
+        window.set_open_playlist_index(position.map_or(-1, |position| position as i32 + 1));
         *self.entries.borrow_mut() = entries;
     }
 
-    /// Changes the open playlist, then shows the change everywhere.
+    /// Changes the open playlist, then shows the change everywhere. Favourites
+    /// can't be changed this way.
     fn edit(
         &self,
         what: &str,
         change: impl FnOnce(&Library, PlaylistId) -> vcmp_library::Result<()>,
     ) {
-        let Some(id) = self.open.get() else {
+        let Some(PlaylistKey::Playlist(id)) = self.open.get() else {
             return;
         };
         if let Err(error) = change(&self.library, id) {
@@ -334,7 +447,7 @@ impl PlaylistBrowser {
     }
 
     fn choose_picture(self: &Rc<Self>) {
-        let Some(id) = self.open.get() else {
+        let Some(PlaylistKey::Playlist(id)) = self.open.get() else {
             return;
         };
         let weak = Rc::downgrade(self);
@@ -350,7 +463,7 @@ impl PlaylistBrowser {
                 return;
             };
             let result = browser.library.set_playlist_image(id, file.path());
-            if browser.open.get() == Some(id) {
+            if browser.open.get() == Some(PlaylistKey::Playlist(id)) {
                 browser.picture_failed.set(result.is_err());
             }
             if let Err(error) = result {
@@ -368,16 +481,20 @@ impl PlaylistBrowser {
 
     /// Asks where to save the open playlist, then exports it there.
     fn choose_export_file(self: &Rc<Self>) {
-        let Some(id) = self.open.get() else {
+        let (Some(window), Some(key)) = (self.window.upgrade(), self.open.get()) else {
             return;
         };
-        let name = self
-            .playlists
-            .borrow()
-            .iter()
-            .find(|playlist| playlist.id == id)
-            .map(|playlist| m3u_file_name(&playlist.name))
-            .unwrap_or_else(|| m3u_file_name(""));
+        let name = match key {
+            PlaylistKey::Favourites => window.global::<Favourites>().get_name().to_string(),
+            PlaylistKey::Playlist(id) => self
+                .playlists
+                .borrow()
+                .iter()
+                .find(|playlist| playlist.id == id)
+                .map(|playlist| playlist.name.clone())
+                .unwrap_or_default(),
+        };
+        let name = m3u_file_name(&name);
         let mut dialog = rfd::AsyncFileDialog::new()
             .add_filter("M3U", M3U_EXTENSIONS)
             .set_file_name(name);
@@ -392,7 +509,7 @@ impl PlaylistBrowser {
             let Some(browser) = weak.upgrade() else {
                 return;
             };
-            if browser.open.get() == Some(id) {
+            if browser.open.get() == Some(key) {
                 browser.export_open(file.path());
             }
         });
@@ -404,7 +521,7 @@ impl PlaylistBrowser {
     /// Exports the open playlist to `file` (with `.m3u8` added when it names
     /// neither M3U extension) and says on its page how that went.
     pub fn export_open(&self, file: &Path) {
-        let Some(id) = self.open.get() else {
+        let Some(key) = self.open.get() else {
             return;
         };
         let known = file
@@ -423,7 +540,11 @@ impl PlaylistBrowser {
             name.push(M3U_EXTENSIONS[0]);
             PathBuf::from(name)
         };
-        let report = match self.library.export_playlist(id, &file) {
+        let written = match key {
+            PlaylistKey::Favourites => self.library.export_favourites(&file),
+            PlaylistKey::Playlist(id) => self.library.export_playlist(id, &file),
+        };
+        let report = match written {
             Ok(report) => {
                 for path in &report.left_out {
                     log::warn!("left out of {}: {}", file.display(), path.display());
@@ -522,6 +643,18 @@ pub(crate) fn cards(playlists: &[Playlist]) -> Vec<Card> {
         .collect()
 }
 
+/// The Favourites card: its fixed name, its number of tracks, and a heart for a
+/// picture.
+fn favourites_card(window: &AppWindow, favourites: &FavouritesSummary) -> Card {
+    let tile = AlbumTile {
+        title: window.global::<Favourites>().get_name(),
+        track_count: favourites.track_count as i32,
+        favourites: true,
+        ..AlbumTile::default()
+    };
+    (tile, None)
+}
+
 /// An entry as a row: its place in the playlist, then where the track comes from.
 fn entry_row(entry: &PlaylistEntry) -> TrackRow {
     let track = &entry.track;
@@ -533,6 +666,8 @@ fn entry_row(entry: &PlaylistEntry) -> TrackRow {
         path: track.path.to_string_lossy().as_ref().into(),
         unavailable: !track.available,
         labels: crate::labels::chips(track.id),
+        track_id: row_id(track.id),
+        liked: liked(track.id),
         ..TrackRow::default()
     }
 }
