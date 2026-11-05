@@ -94,7 +94,12 @@ Nothing - the spec is implemented in full.
 ## Known problems
 
 - On a dark OS, the first start can show Light for a moment before it picks Dark.
-  Slint reports the OS scheme only once the window exists.
+  Slint reports the OS scheme only once the window exists. The pick itself was
+  checked on Windows 11 set to dark: a fresh `VCMP_HOME` saved
+  `{"theme":"dark","accent":"pink"}`. macOS and Linux are not checked.
+- No palette token has been added since theme files exist, so the "derived default
+  for a newer token" rule has no code yet. The next token added has to add it to
+  `theme/file.rs`.
 - Without a library database the theme isn't saved and the first-start pick doesn't
   run. The app starts on Light rather than the OS scheme, unlike before.
 - "Open themes folder" spawns `explorer`, `open` or `xdg-open`. None of them has
