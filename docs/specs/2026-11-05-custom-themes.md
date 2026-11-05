@@ -1,6 +1,6 @@
 # Custom themes
 
-Status: draft
+Status: agreed
 Date: 2026-11-05
 Area: vcmp-app (theme, Settings, setup wizard, title bar, labels, screenshots);
 all three platforms
