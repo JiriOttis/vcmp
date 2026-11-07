@@ -6,20 +6,25 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use lofty::config::WriteOptions;
+use lofty::config::{ParseOptions, WriteOptions};
 use lofty::file::{AudioFile, FileType, TaggedFile, TaggedFileExt};
+use lofty::mp4::{Atom, AtomData, AtomIdent, Ilst, Mp4File};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::tag::{Accessor, ItemKey, Tag, TagExt, TagType};
 use tempfile::TempDir;
-use vcmp_library::{FieldEdit, InvalidTagEdit, Library, TagEdit, TagWriteError, TrackId};
+use vcmp_library::{FieldEdit, Format, InvalidTagEdit, Library, TagEdit, TagWriteError, TrackId};
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
-const FORMATS: [(&str, &str); 4] = [
+const FORMATS: [(&str, &str); 5] = [
     ("silence.mp3", "mp3"),
     ("silence.flac", "flac"),
     ("silence.ogg", "ogg"),
     ("silence.wav", "wav"),
+    ("silence.aiff", "aiff"),
 ];
+/// AAC and ALAC in `.m4a` files. MP4 keeps no picture types, so the tests that expect
+/// a front and a back cover run on [`FORMATS`] only.
+const M4A_FORMATS: [(&str, &str); 2] = [("silence.m4a", "m4a"), ("silence-alac.m4a", "m4a")];
 
 struct Setup {
     // The database closes before the directory is deleted, which Windows requires.
@@ -93,7 +98,7 @@ fn add_file(dir: &Path, name: &str, fixture: &str, title: &str, album: &str) -> 
 
 fn tag_type_for(file: &TaggedFile) -> TagType {
     match file.file_type() {
-        FileType::Wav => TagType::Id3v2,
+        FileType::Wav | FileType::Aiff => TagType::Id3v2,
         _ => file.primary_tag_type(),
     }
 }
@@ -190,6 +195,36 @@ fn audio_payload(path: &Path) -> Vec<u8> {
                 position += 8 + length + length % 2;
             }
             payload
+        }
+        "aiff" => {
+            // Big-endian chunks after the FORM header; COMM describes the audio.
+            let mut payload = Vec::new();
+            let mut position = 12;
+            while position + 8 <= bytes.len() {
+                let id = &bytes[position..position + 4];
+                let length =
+                    u32::from_be_bytes(bytes[position + 4..position + 8].try_into().unwrap())
+                        as usize;
+                if id == b"COMM" || id == b"SSND" {
+                    payload.extend_from_slice(&bytes[position + 8..position + 8 + length]);
+                }
+                position += 8 + length + length % 2;
+            }
+            payload
+        }
+        "m4a" => {
+            // The audio is the `mdat` box. Writing atoms may move it, so only its
+            // contents count.
+            let mut position = 0;
+            while position + 8 <= bytes.len() {
+                let size =
+                    u32::from_be_bytes(bytes[position..position + 4].try_into().unwrap()) as usize;
+                if &bytes[position + 4..position + 8] == b"mdat" {
+                    return bytes[position + 8..position + size].to_vec();
+                }
+                position += size;
+            }
+            panic!("no mdat box")
         }
         "ogg" => {
             // Writing comments renumbers the pages, so compare the packets; the
@@ -503,7 +538,7 @@ fn batch_regroups_the_album_and_reports_the_failing_file() {
         })
         .unwrap();
 
-    assert_eq!(report.written, [ids[0], ids[2], ids[3]]);
+    assert_eq!(report.written, [ids[0], ids[2], ids[3], ids[4]]);
     assert_eq!(report.failed.len(), 1);
     assert_eq!(report.failed[0].track, ids[1]);
     assert!(
@@ -512,19 +547,19 @@ fn batch_regroups_the_album_and_reports_the_failing_file() {
         report.failed[0].error
     );
     assert_eq!(fs::read(&paths[1]).unwrap(), broken);
-    assert_eq!(steps.last(), Some(&(4, 4)));
+    assert_eq!(steps.last(), Some(&(5, 5)));
 
     let new_album = setup.library.track(ids[0]).unwrap().unwrap().album_id;
     assert_ne!(new_album, old_album, "a new album artist makes a new group");
     let album = setup.library.album(new_album.unwrap()).unwrap().unwrap();
     assert_eq!(album.artist.as_deref(), Some("New Album Artist"));
-    assert_eq!(album.track_count, 3);
+    assert_eq!(album.track_count, 4);
     // The damaged file still sits in the old group until the next scan.
     assert_eq!(
         setup.library.track(ids[1]).unwrap().unwrap().album_id,
         old_album
     );
-    assert!(leftovers(&dir, &["0.mp3", "1.flac", "2.ogg", "3.wav"]).is_empty());
+    assert!(leftovers(&dir, &["0.mp3", "1.flac", "2.ogg", "3.wav", "4.aiff"]).is_empty());
 }
 
 #[test]
@@ -830,14 +865,15 @@ fn other(edits: &[(&str, FieldEdit<Vec<String>>)]) -> TagEdit {
 
 fn native_key(extension: &str) -> &'static str {
     match extension {
-        "mp3" | "wav" => "id3:TXXX:MY FIELD",
+        "mp3" | "wav" | "aiff" => "id3:TXXX:MY FIELD",
+        "m4a" => "mp4:----:com.apple.iTunes:MY FIELD",
         _ => "vorbis:MYFIELD",
     }
 }
 
 #[test]
 fn other_tags_round_trip_in_every_format() {
-    for (fixture, extension) in FORMATS {
+    for (fixture, extension) in FORMATS.into_iter().chain(M4A_FORMATS) {
         let mut setup = Setup::new();
         let name = format!("song.{extension}");
         let path = add_file(&setup.music(), &name, fixture, "Title", "Album");
@@ -847,7 +883,7 @@ fn other_tags_round_trip_in_every_format() {
         let native = native_key(extension);
         // ID3v2 holds unsynchronised lyrics only, which lofty names apart.
         let lyrics = match extension {
-            "mp3" | "wav" => "UnsyncLyrics",
+            "mp3" | "wav" | "aiff" => "UnsyncLyrics",
             _ => "Lyrics",
         };
 
@@ -892,7 +928,7 @@ fn other_tags_round_trip_in_every_format() {
 
 #[test]
 fn a_total_is_edited_without_losing_its_number() {
-    for (fixture, extension) in FORMATS {
+    for (fixture, extension) in FORMATS.into_iter().chain(M4A_FORMATS) {
         let mut setup = Setup::new();
         let path = add_file(
             &setup.music(),
@@ -917,7 +953,7 @@ fn a_total_is_edited_without_losing_its_number() {
 
 #[test]
 fn a_number_and_its_total_are_written_together() {
-    for (fixture, extension) in FORMATS {
+    for (fixture, extension) in FORMATS.into_iter().chain(M4A_FORMATS) {
         let mut setup = Setup::new();
         // A file without tags, so the edit creates the tag.
         let path = setup.music().join(format!("song.{extension}"));
@@ -981,7 +1017,7 @@ fn a_total_is_added_to_a_number_without_one() {
 
 #[test]
 fn a_musicbrainz_id_is_written_as_another_tag() {
-    for (fixture, extension) in FORMATS {
+    for (fixture, extension) in FORMATS.into_iter().chain(M4A_FORMATS) {
         let mut setup = Setup::new();
         let path = add_file(
             &setup.music(),
@@ -1060,7 +1096,7 @@ fn a_rating_is_written_in_its_own_form() {
         // ID3v2 keeps a rating only in that form; Vorbis comments keep any text.
         let report = setup.write(&[(id, &other(&[("Popularimeter", values(&["5 stars"]))]))]);
         match extension {
-            "mp3" | "wav" => assert!(
+            "mp3" | "wav" | "aiff" => assert!(
                 matches!(&report.failed[0].error, TagWriteError::UnsupportedKey(key) if key == "Popularimeter"),
                 "{extension}: {:?}",
                 report.failed
@@ -1139,9 +1175,13 @@ fn an_invalid_other_tag_touches_no_file() {
             InvalidTagEdit::NotANumber(key("TrackTotal")),
         ),
         (
-            // An MP4-only key: neither ID3v2 nor Vorbis comments have a field for it.
-            other(&[("AppleXid", values(&["x"]))]),
-            InvalidTagEdit::UnwritableKey(key("AppleXid")),
+            // `(c)nam` is the title atom.
+            other(&[("mp4:\u{a9}nam", values(&["x"]))]),
+            InvalidTagEdit::ShownField(key("mp4:\u{a9}nam")),
+        ),
+        (
+            other(&[("mp4:abc", values(&["x"]))]),
+            InvalidTagEdit::UnknownKey(key("mp4:abc")),
         ),
     ];
     for (edit, expected) in cases {
@@ -1203,4 +1243,178 @@ fn a_vorbis_edit_keeps_the_order_of_the_fields_it_leaves() {
         ["2012-12-26", "2012"]
     );
     assert_eq!(stored(&setup, id, "AlbumArtist"), ["New"]);
+}
+
+#[test]
+fn an_m4a_cover_replaces_its_first_picture() {
+    for (fixture, _) in M4A_FORMATS {
+        let mut setup = Setup::new();
+        let dir = setup.music().join("Album");
+        // MP4 keeps no picture types: the back cover add_file writes is the file's
+        // only picture, so its cover.
+        let path = add_file(&dir, "track.m4a", fixture, "Old title", "Old album");
+        setup.scan();
+        let id = setup.id(&path);
+        let audio_before = audio_payload(&path);
+        let cover = jpeg([200, 30, 90]);
+
+        let edit = TagEdit {
+            title: set("Příliš žluťoučký kůň 🎵"),
+            album_artist: set("Orchestre de la Suisse Romande"),
+            track_number: FieldEdit::Set(7),
+            disc_number: FieldEdit::Set(2),
+            year: FieldEdit::Set(2024),
+            genre: set("Klasická"),
+            cover: FieldEdit::Set(cover.clone()),
+            ..TagEdit::default()
+        };
+        let report = setup.write(&[(id, &edit)]);
+        assert_eq!(report.written, [id], "{fixture}: {:?}", report.failed);
+
+        let (tag, _) = read_tag(&path);
+        assert_eq!(tag.title().as_deref(), Some("Příliš žluťoučký kůň 🎵"));
+        assert_eq!(
+            tag.get_string(ItemKey::AlbumArtist),
+            Some("Orchestre de la Suisse Romande")
+        );
+        assert_eq!(tag.track(), Some(7), "{fixture}");
+        assert_eq!(tag.track_total(), Some(12), "{fixture}: the total stays");
+        assert_eq!(tag.disk(), Some(2), "{fixture}");
+        assert_eq!(tag.date().map(|date| date.year), Some(2024), "{fixture}");
+        assert_eq!(tag.genre().as_deref(), Some("Klasická"));
+        assert_eq!(tag.get_string(ItemKey::Composer), Some("Composer"));
+        assert_eq!(tag.comment().as_deref(), Some("A comment"));
+        assert_eq!(pictures(&tag), [(PictureType::Other, cover.clone())]);
+        assert!(
+            audio_payload(&path) == audio_before,
+            "{fixture}: audio changed"
+        );
+        assert!(leftovers(&dir, &["track.m4a"]).is_empty(), "{fixture}");
+
+        let track = setup.library.track(id).unwrap().unwrap();
+        let format = if fixture.contains("alac") {
+            Format::Alac
+        } else {
+            Format::Aac
+        };
+        assert_eq!(track.format, Some(format));
+        assert_eq!(track.track_number, Some(7));
+        assert_eq!(setup.library.embedded_cover(id).unwrap(), Some(cover));
+
+        let clear = TagEdit {
+            title: FieldEdit::Clear,
+            artist: FieldEdit::Clear,
+            album: FieldEdit::Clear,
+            album_artist: FieldEdit::Clear,
+            track_number: FieldEdit::Clear,
+            disc_number: FieldEdit::Clear,
+            year: FieldEdit::Clear,
+            genre: FieldEdit::Clear,
+            cover: FieldEdit::Clear,
+            ..TagEdit::default()
+        };
+        let report = setup.write(&[(id, &clear)]);
+        assert_eq!(report.written, [id], "{fixture}: {:?}", report.failed);
+        let (tag, _) = read_tag(&path);
+        assert_eq!(tag.title(), None);
+        assert_eq!(tag.get_string(ItemKey::AlbumArtist), None);
+        assert_eq!(
+            (tag.track(), tag.track_total(), tag.disk()),
+            (None, None, None)
+        );
+        assert_eq!(tag.date(), None);
+        assert_eq!(tag.genre(), None);
+        assert_eq!(tag.get_string(ItemKey::Composer), Some("Composer"));
+        assert!(pictures(&tag).is_empty(), "{fixture}");
+        assert!(
+            audio_payload(&path) == audio_before,
+            "{fixture}: audio changed"
+        );
+    }
+}
+
+fn read_ilst(path: &Path) -> Ilst {
+    Mp4File::read_from(&mut fs::File::open(path).unwrap(), ParseOptions::new())
+        .unwrap()
+        .ilst()
+        .cloned()
+        .unwrap()
+}
+
+fn atom_data(ilst: &Ilst, ident: &AtomIdent<'_>) -> Vec<AtomData> {
+    ilst.get(ident).unwrap().data().cloned().collect()
+}
+
+#[test]
+fn m4a_atoms_keep_their_values_and_numbers_stay_numbers() {
+    let mut setup = Setup::new();
+    let path = add_file(&setup.music(), "song.m4a", "silence.m4a", "Title", "Album");
+    let mood = AtomIdent::Freeform {
+        mean: "com.example".into(),
+        name: "Mood Board".into(),
+    };
+    let (tempo, kind) = (AtomIdent::Fourcc(*b"tmpo"), AtomIdent::Fourcc(*b"stik"));
+    let mut ilst = read_ilst(&path);
+    ilst.insert(Atom::new(mood.clone(), AtomData::UTF8("calm".into())));
+    ilst.insert(Atom::new(tempo.clone(), AtomData::SignedInteger(120)));
+    ilst.insert(Atom::new(kind.clone(), AtomData::SignedInteger(1)));
+    ilst.save_to_path(&path, WriteOptions::default()).unwrap();
+    setup.scan();
+    let id = setup.id(&path);
+    assert_eq!(
+        stored(&setup, id, "mp4:----:com.example:Mood Board"),
+        ["calm"]
+    );
+    assert_eq!(stored(&setup, id, "IntegerBpm"), ["120"]);
+    assert_eq!(stored(&setup, id, "mp4:stik"), ["1"]);
+
+    // An edit of the shown fields leaves them exactly as they were.
+    let edit = TagEdit {
+        title: set("New title"),
+        ..TagEdit::default()
+    };
+    let report = setup.write(&[(id, &edit)]);
+    assert_eq!(report.written, [id], "{:?}", report.failed);
+    let ilst = read_ilst(&path);
+    assert_eq!(atom_data(&ilst, &mood), [AtomData::UTF8("calm".into())]);
+    assert_eq!(atom_data(&ilst, &tempo), [AtomData::SignedInteger(120)]);
+    assert_eq!(atom_data(&ilst, &kind), [AtomData::SignedInteger(1)]);
+
+    // Written under their keys, text atoms take several values and number atoms
+    // stay numbers.
+    let edit = other(&[
+        (
+            "mp4:----:com.example:Mood Board",
+            values(&["calm", "bright"]),
+        ),
+        ("mp4:----:com.apple.iTunes:MY FIELD", values(&["new"])),
+        ("IntegerBpm", values(&["128"])),
+        ("mp4:stik", values(&["2"])),
+    ]);
+    let report = setup.write(&[(id, &edit)]);
+    assert_eq!(report.written, [id], "{:?}", report.failed);
+    assert_eq!(
+        stored(&setup, id, "mp4:----:com.example:Mood Board"),
+        ["calm", "bright"]
+    );
+    assert_eq!(
+        stored(&setup, id, "mp4:----:com.apple.iTunes:MY FIELD"),
+        ["new"]
+    );
+    assert_eq!(stored(&setup, id, "IntegerBpm"), ["128"]);
+    assert_eq!(stored(&setup, id, "mp4:stik"), ["2"]);
+    assert_eq!(stored(&setup, id, "TrackTotal"), ["12"]);
+    let ilst = read_ilst(&path);
+    assert_eq!(atom_data(&ilst, &tempo), [AtomData::SignedInteger(128)]);
+    assert_eq!(atom_data(&ilst, &kind), [AtomData::SignedInteger(2)]);
+
+    // A number atom takes nothing else, and the file is left alone.
+    let before = fs::read(&path).unwrap();
+    let report = setup.write(&[(id, &other(&[("mp4:stik", values(&["music"]))]))]);
+    assert!(
+        matches!(&report.failed[..], [failed] if matches!(failed.error, TagWriteError::Write(_))),
+        "{:?}",
+        report.failed
+    );
+    assert_eq!(fs::read(&path).unwrap(), before);
 }

@@ -320,7 +320,7 @@ fn assert_fade_then_silence(samples: &[f32]) {
 
 fn tolerance(extension: &str) -> f32 {
     match extension {
-        "wav" | "flac" => 1e-4,
+        "wav" | "flac" | "aiff" | "alac.m4a" => 1e-4,
         "ogg" => 0.03,
         _ => 0.1,
     }
@@ -328,7 +328,7 @@ fn tolerance(extension: &str) -> f32 {
 
 #[test]
 fn an_album_plays_gaplessly_sample_for_sample() {
-    for extension in ["wav", "flac", "mp3", "ogg"] {
+    for extension in ["wav", "flac", "mp3", "ogg", "aiff", "alac.m4a"] {
         let mut h = Harness::new(CD);
         let (a, b) = (file("a", extension), file("b", extension));
         h.play_context(vec![a.clone(), b.clone()]);

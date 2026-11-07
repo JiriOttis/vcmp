@@ -465,7 +465,7 @@ fn discover(
                 }
                 continue;
             }
-            if Format::from_extension(entry.path()).is_none() {
+            if !Format::is_candidate(entry.path()) {
                 continue;
             }
             let Ok(metadata) = entry.metadata() else {

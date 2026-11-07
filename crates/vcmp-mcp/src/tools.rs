@@ -38,7 +38,9 @@ find_tracks_by_tag, list_labels, find_tracks_by_labels, list_playlists and \
 get_playlist. get_tracks lists every tag a \
 file holds, by key: lofty's common name (TrackTitle, Composer, MusicBrainzReleaseId, \
 ReplayGainTrackGain) or the format's own key behind a prefix (id3:TXXX:MY FIELD, \
-vorbis:MYFIELD). The same keys are used to change tags.
+vorbis:MYFIELD, mp4:----:com.apple.iTunes:MY FIELD, mp4:stik). Copy keys from \
+get_tracks rather than typing them: many MP4 atoms start with the copyright sign. \
+The same keys are used to change tags.
 
 Changing tags never happens at once. propose_tag_changes records a change set that \
 waits until the owner reviews it in VCMP and accepts or rejects it, as a whole. Check \

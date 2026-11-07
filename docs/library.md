@@ -74,8 +74,8 @@ aren't valid UTF-8 keep working.
 ## Scanning
 
 1. **Discover.** Walk every source (only its top level when `recursive` is off) and
-   collect `.mp3`, `.flac`, `.ogg`/`.oga` and `.wav` files with their size and
-   modification time. A source that isn't a readable directory is reported as
+   collect `.mp3`, `.flac`, `.ogg`/`.oga`, `.wav`, `.aif`/`.aiff`/`.aifc` and `.m4a`
+   files with their size and modification time. `.mp4` files are never looked at. A source that isn't a readable directory is reported as
    unreachable.
 2. **Compare.**
    - An unchanged file (same size and mtime) is left alone; if it was unavailable, it
@@ -93,8 +93,11 @@ aren't valid UTF-8 keep working.
      every file, was not saved. Re-reading files after a tag write reads them all
      first for the same reason.
    - The file type is detected from content, not the extension, so an Opus stream
-     named `.ogg` is skipped as unsupported. Unreadable files are skipped and listed
-     in the report.
+     named `.ogg` is skipped as unsupported. An `.m4a` file is stored as AAC or
+     ALAC, the codec lofty reads; one holding anything else (MP3, FLAC) or a video
+     track (a `vide` handler in `moov/trak/mdia/hdlr`, which VCMP reads itself since
+     lofty reads only the audio track) is skipped as unsupported. Unreadable files
+     are skipped and listed in the report.
    - The first file of each folder is read with its embedded cover, which sits next
      to the tags, so a new album's artwork costs no extra disk seek.
    - A new or changed file sends an album that already had art to step 7, which
@@ -150,7 +153,8 @@ translated.
 ## All tags
 
 Besides the fields VCMP shows, a scan stores every text item of the tag it reads
-(ID3v2 in MP3 and WAV, Vorbis comments in FLAC and Ogg Vorbis) in `track_tags`, and
+(ID3v2 in MP3, WAV and AIFF, Vorbis comments in FLAC and Ogg Vorbis, MP4 atoms in
+M4A) in `track_tags`, and
 `Library::track_tags` returns them. They are there for AI agents (see the
 [MCP spec](specs/2026-10-19-mcp-library-server.md)), which can find, for example,
 every track without a MusicBrainz ID: `Library::tag_keys` lists every key with how
@@ -162,15 +166,22 @@ key (with a value, when given) or lack it, a page at a time;
   name (`TrackTitle`, `Composer`, `MusicBrainzReleaseId`, `ReplayGainTrackGain`),
   the same in every format. Anything else keeps the format's own key behind a
   prefix: `id3:` and the frame ID, plus the frame's description after a colon where
-  it has one (`id3:TXXX:MY FIELD`, `id3:COMM:iTunNORM`, `id3:POPM:<email>`), or
-  `vorbis:` and the field name in capitals (`vorbis:MYFIELD`).
+  it has one (`id3:TXXX:MY FIELD`, `id3:COMM:iTunNORM`, `id3:POPM:<email>`),
+  `vorbis:` and the field name in capitals (`vorbis:MYFIELD`), or `mp4:` and the
+  atom: its four characters as lofty reads them (`mp4:stik`; byte `0xA9` is the
+  copyright sign, which many atom names start with) or, for a freeform atom, `----`,
+  its mean and its name (`mp4:----:com.apple.iTunes:MY FIELD`). An atom lofty has a
+  name for keeps that name even when it holds a number lofty's split leaves alone
+  (the integer `tmpo` is `IntegerBpm`).
 - **Values** are stored as the file holds them, untrimmed. A field with several
   values (Vorbis comments may repeat a field, ID3v2.4 separates values with a NUL)
   is one row per value, and `position` keeps the order. `TRCK` and `TPOS` split into
   number and total (`TrackNumber`, `TrackTotal`); one that isn't a number stays
-  whole under `TrackNumber`, so malformed values stay visible.
-- **What is left out:** pictures, binary frames (`PRIV`, `GEOB`, chapters) and a
-  file's other tags (ID3v1 and APE in an MP3, RIFF INFO in a WAV). A file without
+  whole under `TrackNumber`, so malformed values stay visible. An MP4 atom's
+  numbers and flags are listed in decimal (`mp4:stik` `1`).
+- **What is left out:** pictures, binary frames (`PRIV`, `GEOB`, chapters) and
+  atoms (binary data), and a file's other tags (ID3v1 and APE in an MP3, RIFF INFO
+  in a WAV, text chunks in an AIFF). A file without
   the tag VCMP reads stores the items of the tag its fields came from instead.
 - **Reading** goes through each format's own lofty type, not the probe's
   format-independent view: that view drops the items it has no name for.
@@ -200,15 +211,19 @@ Each file is written through a verified copy:
 2. Copy the file next to itself as `.<name>.<random>.vcmp-tmp`, with the same
    permissions. The name hides it from scans and file managers. A failure at any
    later step deletes the copy.
-3. Edit the tag VCMP reads in the copy: ID3v2 in MP3 and WAV, Vorbis comments in
-   FLAC and Ogg Vorbis. The tag is edited in place, so frames and fields the editor
+3. Edit the tag VCMP reads in the copy: ID3v2 in MP3, WAV and AIFF, Vorbis
+   comments in FLAC and Ogg Vorbis, MP4 atoms (`ilst`) in M4A. The tag is edited in
+   place, so frames, fields and atoms the editor
    doesn't know (comments, composer, lyrics, ReplayGain, MusicBrainz IDs, other
    pictures) are kept. An ID3v2.3 tag stays ID3v2.3 when that loses nothing. Taggers
    also put ID3v2.4 frames (full original and release dates) into ID3v2.3 tags, and
    ID3v2.3 can hold only the year of those, so such a tag is written as ID3v2.4.
    When the file has
    no such tag, it is created with what the scan read from the file's other tags, so
-   an MP3 with only ID3v1 loses no values.
+   an MP3 with only ID3v1 loses no values. In an M4A file the album artist is
+   `aART`, the year `©day`, and the cover the first picture of `covr`, since MP4
+   keeps no picture types: a new cover goes first, and removing the cover removes
+   the first picture.
 4. Read the copy back and compare:
    - every item, every `track_tags` entry and every picture of the written tag with
      what was meant to be written;
@@ -257,18 +272,21 @@ writes with.
   (`Popularimeter`, `Easy CD-DA Extractor|4|0`), and ID3v2 drops anything else.
 - **Refused before any file is touched** (`InvalidTagEdit`): a key that isn't one
   (`UnknownKey`), a key of the nine fields under any name (`ShownField`: `TrackTitle`,
-  `id3:TIT2`, `vorbis:ALBUMARTIST`), a key no kind of tag VCMP writes holds
-  (`UnwritableKey`: `AppleXid`, or a native key whose frame VCMP can't build such as
-  `id3:POPM:<email>` and `id3:TIPL:<role>`; clearing those works), a value with a
-  control character other than a line break or tab or an empty value, a value that
-  isn't a whole number for a key lofty keeps as a number (`TrackTotal`,
-  `MovementNumber`), and a value neither ID3v2 nor Vorbis comments keep
-  (`BadValue`).
-- **Refused for one file** (`TagWriteError::UnsupportedKey`): a native key of the
-  other kind of tag (`id3:` in a FLAC file), a common name the format has no field
-  for (ID3v2 has no `Lyrics`, only `UnsyncLyrics`), a value only the other kind keeps
-  (a rating as free text is kept in a FLAC file, not in an MP3), and two keys of one
-  edit that name the same tag.
+  `id3:TIT2`, `vorbis:ALBUMARTIST`, `mp4:©nam`), a native key whose frame VCMP
+  can't build (`UnwritableKey`: `id3:POPM:<email>` and `id3:TIPL:<role>`; clearing
+  those works), a value with a control character other than a line break or tab or
+  an empty value, a value that isn't a whole number for a key lofty keeps as a
+  number (`TrackTotal`, `MovementNumber`), and a value no kind of tag VCMP writes
+  keeps (`BadValue`). Every common name lofty knows has a place in ID3v2, Vorbis
+  comments or MP4 atoms, so none is refused as unwritable before the files are
+  known: `AppleXid`, an MP4 atom only, is refused for each MP3 or FLAC file.
+- **Refused for one file** (`TagWriteError::UnsupportedKey`): a native key of
+  another kind of tag (`id3:` in a FLAC file, `mp4:` in an AIFF), a common name the
+  format has no field for (ID3v2 has no `Lyrics`, only `UnsyncLyrics`), a value only
+  another kind keeps (a rating as free text is kept in a FLAC file, not in an MP3),
+  and two keys of one edit that name the same tag. An MP4 atom that holds numbers
+  in the file and is given something else (`mp4:stik` `music`), or that holds binary
+  data, fails that file with `TagWriteError::Write`.
 - **ID3v2.** A native key replaces its frames (by frame ID and description) with one
   new frame; several values are joined with NULs. A number or its total is written
   by VCMP into the frame holding both as `number/total` (`TRCK` for `TrackNumber`
@@ -285,6 +303,13 @@ writes with.
   two values of one key (an `ORIGINALDATE` and an `ORIGINALYEAR` are both
   `OriginalReleaseDate`), so every Vorbis edit, the nine fields' included, puts the
   fields it keeps back in their original order.
+- **MP4 atoms.** A native key replaces the atom with one holding the values, as
+  text, or as numbers or flags when the atom it replaces held those (players read
+  `tmpo` and `stik` only as numbers). A common name goes through lofty's generic
+  tag like ID3v2, for the atoms holding that key and the atom lofty writes it to
+  (a `trkn` without a total lists only the number, and a total goes into it), so
+  `trkn` and `disk` keep the part not edited. A number lofty's split leaves in its
+  atom (the integer `tmpo`) is replaced too, and written back as a number.
 
 `examples/edit_check.rs` copies a sample of a real collection into
 `target/edit-check/`, then edits every copy twice: once setting every field, a
@@ -635,9 +660,24 @@ cargo run --release -p vcmp-library --example scan_profile -- /path/to/music
 - Multi-value artist tags are joined with ", " into one artist name.
 - MP3 durations count whole frames, so they can be a fraction of a second longer
   than what plays.
-- Tag writing updates only the tag VCMP reads. An ID3v1 or APE tag in an MP3, or a
-  RIFF INFO list in a WAV file, keeps its old values, and players that prefer those
-  tags (Windows Explorer reads RIFF INFO in WAV files) show them.
+- Tag writing updates only the tag VCMP reads. An ID3v1 or APE tag in an MP3, a
+  RIFF INFO list in a WAV file, or the text chunks of an AIFF file keep their old
+  values, and players that prefer those tags (Windows Explorer reads RIFF INFO in
+  WAV files) show them.
+- MP4 keeps no picture types, so in an M4A file the cover is the first picture. A
+  file whose first picture is another picture (a back cover saved first) has that
+  picture replaced or removed by a cover edit.
+- lofty upgrades an old numeric `gnre` genre atom to a `©gen` text atom when it
+  reads an M4A file, so any write turns `gnre` into `©gen`; when the file has
+  both, the `gnre` atom is dropped. The scan lists the genre the same before and
+  after.
+- lofty writes an MP4 number with as few bytes as it needs, so a number atom VCMP
+  writes (`tmpo`, `stik`) may be shorter than the four bytes some players write.
+- An `.m4a` file holding chapter pictures as a video track (some enhanced podcasts)
+  may count as video and be skipped.
+- Tag writing on M4A files goes through lofty's least tested writer.
+  Run `examples/edit_check.rs` on copies of real files before relying on it; the
+  read-back check refuses to replace a file that reads back wrong.
 - A comment or lyrics frame VCMP writes gets the unknown language `XXX`, whatever
   language the frame it replaces had.
 - ID3v2 keeps a total only behind its number. A total for an MP3 or WAV file

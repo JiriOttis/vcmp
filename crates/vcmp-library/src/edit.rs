@@ -4,10 +4,10 @@
 //! edited and read back, and only a copy whose every field checks out replaces the
 //! original, by an atomic rename. A failure at any step leaves the original as it was.
 //!
-//! Only the tag VCMP reads is written: ID3v2 in MP3 and WAV files, Vorbis comments in
-//! FLAC and Ogg Vorbis files. It is edited in place, so frames and fields the editor
-//! does not know are kept as they are. Tags beyond the nine fields go through
-//! [`crate::other_tags`].
+//! Only the tag VCMP reads is written: ID3v2 in MP3, WAV and AIFF files, Vorbis
+//! comments in FLAC and Ogg Vorbis files, MP4 atoms (`ilst`) in M4A files. It is
+//! edited in place, so frames, fields and atoms the editor does not know are kept as
+//! they are. Tags beyond the nine fields go through [`crate::other_tags`].
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -22,7 +22,9 @@ use lofty::flac::FlacFile;
 use lofty::id3::v2::{
     Frame, FrameId, Id3v2Tag, Id3v2Version, TextInformationFrame, TimestampFrame,
 };
+use lofty::iff::aiff::AiffFile;
 use lofty::iff::wav::WavFile;
+use lofty::mp4::{Atom, AtomData, AtomIdent, Ilst, Mp4File};
 use lofty::mpeg::MpegFile;
 use lofty::ogg::tag::VorbisComments;
 use lofty::ogg::{OggPictureStorage, VorbisFile};
@@ -473,6 +475,13 @@ impl Snapshot {
         }
     }
 
+    fn mp4(tag: Option<&Ilst>) -> Self {
+        match tag {
+            Some(tag) => Self::new(tag.clone().into(), tags::mp4_entries(tag), &[]),
+            None => Self::default(),
+        }
+    }
+
     fn new(
         tag: Tag,
         tag_entries: Vec<TagEntry>,
@@ -543,17 +552,20 @@ fn edit_tag(
     let options = ParseOptions::new();
     let read_error = failed("reading the tags");
     match format {
-        Format::Mp3 | Format::Wav => {
-            let existing = if format == Format::Mp3 {
-                MpegFile::read_from(file, options)
+        Format::Mp3 | Format::Wav | Format::Aiff => {
+            let existing = match format {
+                Format::Mp3 => MpegFile::read_from(file, options)
                     .map_err(read_error)?
                     .id3v2()
-                    .cloned()
-            } else {
-                WavFile::read_from(file, options)
+                    .cloned(),
+                Format::Wav => WavFile::read_from(file, options)
                     .map_err(read_error)?
                     .id3v2()
-                    .cloned()
+                    .cloned(),
+                _ => AiffFile::read_from(file, options)
+                    .map_err(read_error)?
+                    .id3v2()
+                    .cloned(),
             };
             let was_id3v23 = existing
                 .as_ref()
@@ -618,6 +630,20 @@ fn edit_tag(
                 .map_err(failed("saving the tags"))?;
             Ok((Snapshot::vorbis(Some(&tag), flac.pictures()), created))
         }
+        Format::Aac | Format::Alac => {
+            let mp4 = Mp4File::read_from(file, options).map_err(read_error)?;
+            let created = mp4.ilst().is_none();
+            let mut tag = match mp4.ilst() {
+                Some(tag) => tag.clone(),
+                None => seeded(TagType::Mp4Ilst, current).into(),
+            };
+            edit_mp4(&mut tag, edit)?;
+            other_tags::edit_mp4(&mut tag, other)?;
+            file.rewind().map_err(|error| error.to_string())?;
+            tag.save_to(file, WriteOptions::new())
+                .map_err(failed("saving the tags"))?;
+            Ok((Snapshot::mp4(Some(&tag)), created))
+        }
     }
 }
 
@@ -639,6 +665,16 @@ fn snapshot(file: &mut File, format: Format) -> Result<Snapshot, String> {
             WavFile::read_from(file, options)
                 .map_err(read_error)?
                 .id3v2(),
+        ),
+        Format::Aiff => Snapshot::id3v2(
+            AiffFile::read_from(file, options)
+                .map_err(read_error)?
+                .id3v2(),
+        ),
+        Format::Aac | Format::Alac => Snapshot::mp4(
+            Mp4File::read_from(file, options)
+                .map_err(read_error)?
+                .ilst(),
         ),
         Format::OggVorbis => Snapshot::vorbis(
             Some(
@@ -845,6 +881,79 @@ fn edit_vorbis_fields(tag: &mut VorbisComments, edit: &TagEdit) {
         FieldEdit::Set(value) => tag.set_genre(value.to_owned()),
         FieldEdit::Clear => tag.remove_genre(),
     }
+}
+
+/// The album artist's atom.
+const ALBUM_ARTIST_ATOM: AtomIdent<'static> = AtomIdent::Fourcc(*b"aART");
+
+fn edit_mp4(tag: &mut Ilst, edit: &TagEdit) -> Result<(), String> {
+    match edit.title.normalized() {
+        FieldEdit::Keep => {}
+        FieldEdit::Set(value) => tag.set_title(value.to_owned()),
+        FieldEdit::Clear => tag.remove_title(),
+    }
+    match edit.artist.normalized() {
+        FieldEdit::Keep => {}
+        FieldEdit::Set(value) => tag.set_artist(value.to_owned()),
+        FieldEdit::Clear => tag.remove_artist(),
+    }
+    match edit.album.normalized() {
+        FieldEdit::Keep => {}
+        FieldEdit::Set(value) => tag.set_album(value.to_owned()),
+        FieldEdit::Clear => tag.remove_album(),
+    }
+    match edit.album_artist.normalized() {
+        FieldEdit::Keep => {}
+        FieldEdit::Set(value) => {
+            tag.replace_atom(Atom::new(
+                ALBUM_ARTIST_ATOM,
+                AtomData::UTF8(value.to_owned()),
+            ));
+        }
+        FieldEdit::Clear => tag.remove(&ALBUM_ARTIST_ATOM).for_each(drop),
+    }
+    // `trkn` and `disk` hold the number and the total: setting the number keeps the
+    // total, clearing it drops both, as for the other formats.
+    match edit.track_number {
+        FieldEdit::Keep => {}
+        FieldEdit::Set(value) => tag.set_track(value),
+        FieldEdit::Clear => tag.remove_track(),
+    }
+    match edit.disc_number {
+        FieldEdit::Keep => {}
+        FieldEdit::Set(value) => tag.set_disk(value),
+        FieldEdit::Clear => tag.remove_disk(),
+    }
+    match edit.year {
+        FieldEdit::Keep => {}
+        FieldEdit::Set(year) => tag.set_date(year_only(year as u16)),
+        FieldEdit::Clear => tag.remove_date(),
+    }
+    match edit.genre.normalized() {
+        FieldEdit::Keep => {}
+        FieldEdit::Set(value) => tag.set_genre(value.to_owned()),
+        FieldEdit::Clear => tag.remove_genre(),
+    }
+    if !edit.cover.is_keep() {
+        // MP4 keeps no picture types, so the cover is the first picture, and the new
+        // one goes first for the scanner to find.
+        let mut pictures: Vec<Picture> = tag
+            .pictures()
+            .map(|pictures| pictures.cloned().collect())
+            .unwrap_or_default();
+        let types: Vec<PictureType> = pictures.iter().map(Picture::pic_type).collect();
+        for index in cover_indexes(&types).into_iter().rev() {
+            pictures.remove(index);
+        }
+        if let FieldEdit::Set(data) = &edit.cover {
+            pictures.insert(0, front_cover(data)?);
+        }
+        tag.remove_pictures();
+        for picture in pictures {
+            tag.insert_picture(picture);
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn is_album_artist_key(key: &str) -> bool {

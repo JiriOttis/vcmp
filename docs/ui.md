@@ -844,7 +844,7 @@ The Albums page tells apart why it is empty:
     volume slider changes it, 5 % a notch (a third of that each frame of a
     `WheelScroller` glide, which adds up the same), and the volume is saved once
     the wheel has rested for 400 ms;
-  - after the artist, a mark for a lossless file (FLAC or WAV, from the library's
+  - after the artist, a mark for a lossless file (FLAC, WAV, AIFF or ALAC, from the library's
     `tracks.format`) and, while a Last.fm account is connected, a mark for a play
     Last.fm will count, which changes to a tick once it has (`PlayerState.scrobble`,
     set from the same `lastfm::Play` that hands the scrobble over). Pointing at a

@@ -10,8 +10,20 @@ ffmpeg $SRC -c:a libmp3lame -b:a 8k silence.mp3
 ffmpeg $SRC -c:a flac silence.flac
 ffmpeg $SRC -c:a libvorbis -q:a 0 silence.ogg
 ffmpeg $SRC -c:a pcm_s16le silence.wav
+ffmpeg $SRC -c:a pcm_s16be silence.aiff
+ffmpeg $SRC -c:a aac -b:a 16k silence.m4a
+ffmpeg $SRC -c:a alac silence-alac.m4a
 ffmpeg -f lavfi -i anullsrc=r=48000:cl=mono -t 1 -map_metadata -1 -fflags +bitexact -c:a libopus -b:a 6k opus-in-ogg.ogg
 ```
 
 `opus-in-ogg.ogg` is an Opus stream with an `.ogg` extension. v1 plays Ogg Vorbis
 only, so the scanner must skip it.
+
+The scanner must skip two more `.m4a` files: `video-in-m4a.m4a` holds a video track
+next to its AAC audio, and `mp3-in-m4a.m4a` holds MP3 audio, which VCMP doesn't play
+from an MP4 file.
+
+```bash
+ffmpeg -f lavfi -i anullsrc=r=8000:cl=mono -f lavfi -i color=c=black:s=16x16:r=1 -t 1 -map_metadata -1 -fflags +bitexact -flags:a +bitexact -flags:v +bitexact -c:a aac -b:a 16k -c:v mpeg4 -f mp4 video-in-m4a.m4a
+ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 1 -map_metadata -1 -fflags +bitexact -flags:a +bitexact -c:a libmp3lame -b:a 32k -f mp4 mp3-in-m4a.m4a
+```
