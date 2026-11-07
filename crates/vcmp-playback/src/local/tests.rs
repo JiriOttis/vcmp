@@ -9,13 +9,14 @@ use crate::test_signal::{RATE, SPLIT, TOTAL, fixture, reference};
 /// encoder delay would shift the phase and push errors towards the full amplitude.
 fn tolerance(extension: &str) -> f32 {
     match extension {
-        "wav" | "flac" => 1e-4,
+        "wav" | "flac" | "aiff" | "alac.m4a" => 1e-4,
         "ogg" => 0.03,
         _ => 0.1,
     }
 }
 
-const FORMATS: [&str; 4] = ["wav", "flac", "mp3", "ogg"];
+/// Every fixture format that plays gaplessly; AAC has its own test below.
+const FORMATS: [&str; 6] = ["wav", "flac", "mp3", "ogg", "aiff", "alac.m4a"];
 
 fn decode(path: &Path) -> Vec<f32> {
     let mut stream = LocalStream::open(path).unwrap();
@@ -52,6 +53,19 @@ fn every_format_decodes_to_the_exact_length() {
         assert_eq!(a.len() / 2, SPLIT, "{extension}: frames in part a");
         assert_eq!(b.len() / 2, TOTAL - SPLIT, "{extension}: frames in part b");
     }
+}
+
+/// symphonia reads no delay or padding for AAC in MP4, neither the edit list nor
+/// iTunes' iTunSMPB. Each part keeps the encoder's 1024 frames of delay and its
+/// padding to whole 1024-frame packets: 1119 extra frames (25 ms) between the two
+/// parts here. When this fails, AAC has become gapless: update docs/playback.md.
+#[test]
+fn aac_in_mp4_keeps_its_encoder_delay_and_padding() {
+    let encoded = |frames: usize| (1024 + frames).next_multiple_of(1024);
+    let a = decode(&fixture("a", "aac.m4a"));
+    let b = decode(&fixture("b", "aac.m4a"));
+    assert_eq!(a.len() / 2, encoded(SPLIT));
+    assert_eq!(b.len() / 2, encoded(TOTAL - SPLIT));
 }
 
 #[test]

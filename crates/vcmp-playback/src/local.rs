@@ -18,10 +18,11 @@ use crate::source::{AudioChunk, AudioFormat, TrackSource, TrackStream};
 
 /// Plays files from disk. The track id is the file path.
 ///
-/// Formats: MP3, FLAC, WAV and Ogg Vorbis. Gapless trimming comes from symphonia:
-/// MP3 needs a LAME/Xing (or Lavf/Lavc) header with delay and padding, iTunes'
-/// iTunSMPB is not read; Vorbis uses the Ogg granule positions; FLAC and WAV have
-/// nothing to trim.
+/// Formats: MP3, FLAC, WAV, AIFF, Ogg Vorbis, and AAC and ALAC in MP4. Gapless
+/// trimming comes from symphonia: MP3 needs a LAME/Xing (or Lavf/Lavc) header with
+/// delay and padding, iTunes' iTunSMPB is not read; Vorbis uses the Ogg granule
+/// positions; FLAC, WAV, AIFF and ALAC have nothing to trim. AAC in MP4 is not
+/// trimmed: symphonia reads neither the edit list nor iTunSMPB.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LocalSource;
 
