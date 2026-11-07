@@ -1386,6 +1386,26 @@ impl PlayerService {
         });
     }
 
+    /// Plays `tracks` from track `start`, as the context `origin` names (the queue
+    /// panel's "Next from ..."), or none. For lists the library view doesn't keep,
+    /// such as the Library check's.
+    pub fn play_tracks(&self, tracks: &[Track], origin: Option<String>, start: usize) {
+        if start >= tracks.len() {
+            return;
+        }
+        // Tracks left out of the queue move the start back.
+        let start = tracks[..start].iter().filter_map(entry).count();
+        let entries: Vec<QueueEntry> = tracks.iter().filter_map(entry).collect();
+        if start >= entries.len() {
+            return;
+        }
+        self.player.send(Command::PlayContext {
+            entries,
+            origin,
+            start: Some(start),
+        });
+    }
+
     /// Applies one engine event to `PlayerState`.
     pub fn handle_event(&self, event: Event) {
         let Some(window) = self.window.upgrade() else {

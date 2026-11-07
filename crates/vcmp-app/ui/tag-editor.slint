@@ -85,6 +85,9 @@ export global TagEditorState {
     // Opens the editor for the track with this file path, or for the album page's album.
     callback edit-track(string);
     callback edit-album();
+    // Opens it for the tracks with these file paths, together (the Library check's
+    // album blocks).
+    callback edit-files([string]);
     // Chooses an image file as the cover, or takes the cover away.
     callback choose-cover();
     callback remove-cover();

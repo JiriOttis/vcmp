@@ -21,6 +21,7 @@ import { Playlists } from "playlist-state.slint";
 import { PhotoKeyRow, PhotoSearch } from "photo-picker.slint";
 import { AgentsSection } from "agents.slint";
 import { LabelFilter, LabelFilterPage, Labels, LabelsSection } from "labels.slint";
+import { LibraryCheck } from "library-check.slint";
 
 // Shared frame of Settings and About: title plus content in a column in the middle of
 // the page, fading in when the page is opened. The column takes 60 % of a wide page,
@@ -87,6 +88,19 @@ export component SettingsPage inherits Page {
     }
 
     LibrarySection { }
+
+    // The Library check opens in place of Settings, as a page of its own.
+    if LibraryState.folders.length > 0: SettingRow {
+        title: @tr("Library check");
+        description: @tr("Finds duplicate tracks, tracks with missing tags and albums without a cover. It changes nothing by itself.");
+
+        Button {
+            text: @tr("Check library…");
+            clicked => {
+                LibraryCheck.show();
+            }
+        }
+    }
 
     VerticalLayout {
         spacing: Theme.space-xs;

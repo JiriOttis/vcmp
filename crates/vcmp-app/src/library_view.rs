@@ -1,6 +1,7 @@
 //! Connects the library to the window: the album grid and the album page that
 //! opens from it, the artist grid with the artist page and its albums, search, the
-//! songs table, the folder browser, the playlists, the labels and the favourites.
+//! songs table, the folder browser, the playlists, the labels, the favourites and
+//! the Library check.
 //! All of them are reloaded after every library change, and their rows after every
 //! change of labels; a change of favourites updates the rows' hearts in place.
 
@@ -17,6 +18,7 @@ use crate::albums::{AlbumBrowser, Card, CoverGrid, Grid, album_initial, cards, i
 use crate::favourites::{self, Hearts};
 use crate::folders::FolderBrowser;
 use crate::labels::{self, LabelBrowser};
+use crate::library_check::CheckPage;
 use crate::moving_pictures::{self, Picture};
 use crate::playlists::{self, PlaylistBrowser, PlaylistKey};
 use crate::{
@@ -54,6 +56,7 @@ pub struct LibraryView {
     playlists: Rc<PlaylistBrowser>,
     labels: Rc<LabelBrowser>,
     hearts: Rc<Hearts>,
+    check: Rc<CheckPage>,
 }
 
 /// Setting key: the Songs page's sort, as "<column>" or "<column>:reverse".
@@ -100,6 +103,7 @@ impl LibraryView {
         let browser = AlbumBrowser::connect(window, &albums);
         let folders = FolderBrowser::connect(window, library.clone());
         let playlists = PlaylistBrowser::connect(window, library.clone());
+        let check = CheckPage::connect(window, library.clone());
         hearts.set_playlists(Rc::downgrade(&playlists));
         let artist_grid = CoverGrid::connect(window, Grid::Artists, Vec::new(), 2);
         let artist_albums_grid = CoverGrid::connect(window, Grid::ArtistAlbums, Vec::new(), 2);
@@ -131,6 +135,7 @@ impl LibraryView {
             playlists,
             labels,
             hearts,
+            check,
         });
         view.labels.set_view(Rc::downgrade(&view));
         if let Some((column, descending)) = view
@@ -333,6 +338,7 @@ impl LibraryView {
         }
         self.folders.reload();
         self.playlists.reload();
+        self.check.reload();
         let Some(window) = self.window.upgrade() else {
             return;
         };
@@ -389,6 +395,11 @@ impl LibraryView {
 
     pub fn labels(&self) -> &Rc<LabelBrowser> {
         &self.labels
+    }
+
+    /// The Library check page.
+    pub fn check(&self) -> &Rc<CheckPage> {
+        &self.check
     }
 
     /// The favourites: every heart and favourites menu entry.

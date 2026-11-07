@@ -32,11 +32,11 @@ use vcmp_app::themes::Themes;
 use vcmp_app::updates;
 use vcmp_app::{
     AgentState, AlbumTile, AppWindow, ArtworkState, ChangeEntry, ChangeField, ChangeGroup,
-    ChangeKind, ChangeProblem, ChangeRow, ChangeStatus, Confirmation, CoverSearch as CoverPicker,
-    CoverSearchStatus, LastfmState, LastfmStatus, PhotoSearch, PhotoSearchStatus, PlayerState,
-    ReduceMotion, ReviewStatus, SelectionChange, ServerStatus, Setup, SleepTimer, TagChange,
-    TagEditorState, TagEditorStatus, TagField, Theme, ThemeKind, Themes as ThemesState,
-    TrackSelection, UpdateState,
+    ChangeKind, ChangeProblem, ChangeRow, ChangeStatus, CheckTab, Confirmation,
+    CoverSearch as CoverPicker, CoverSearchStatus, LastfmState, LastfmStatus, LibraryCheck,
+    PhotoSearch, PhotoSearchStatus, PlayerState, ReduceMotion, ReviewStatus, SelectionChange,
+    ServerStatus, Setup, SleepTimer, TagChange, TagEditorState, TagEditorStatus, TagField, Theme,
+    ThemeKind, Themes as ThemesState, TrackSelection, UpdateState,
 };
 use vcmp_integrations::discord::Listening;
 use vcmp_integrations::musicbrainz::AlbumQuery;
@@ -87,6 +87,8 @@ struct Shot {
     setup: Option<i32>,
     // The window is tall enough for the whole Settings page.
     tall: bool,
+    // The Library check is open in place of Settings, on this tab.
+    check: Option<CheckTab>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -127,6 +129,7 @@ const fn shot(
         queue_edge: false,
         setup: None,
         tall: false,
+        check: None,
     }
 }
 
@@ -246,6 +249,14 @@ const fn setup(name: &'static str, theme: &'static str, step: i32) -> Shot {
     }
 }
 
+/// The Library check on one of its tabs, over the library `VCMP_HOME` names.
+const fn check(name: &'static str, theme: &'static str, tab: CheckTab) -> Shot {
+    Shot {
+        check: Some(tab),
+        ..shot(name, theme, 7, None, 0)
+    }
+}
+
 const fn cover_picker(name: &'static str, theme: &'static str) -> Shot {
     Shot {
         cover_picker: true,
@@ -300,6 +311,12 @@ const SHOTS: &[Shot] = &[
     tags_waiting("tags-waiting-dark", "dark"),
     tags_confirm("tags-confirm-light", "light"),
     tags_confirm("tags-confirm-dark", "dark"),
+    check("check-duplicates-light", "light", CheckTab::Duplicates),
+    check("check-duplicates-dark", "dark", CheckTab::Duplicates),
+    check("check-tags-light", "light", CheckTab::MissingTags),
+    check("check-tags-dark", "dark", CheckTab::MissingTags),
+    check("check-covers-light", "light", CheckTab::MissingCovers),
+    check("check-covers-dark", "dark", CheckTab::MissingCovers),
     shot("settings-light", "light", 7, None, 0),
     shot("settings-dark", "dark", 7, None, 0),
     shot("settings-darker", "darker", 7, None, 0),
@@ -411,6 +428,14 @@ fn prepare(window: &AppWindow, shot: &Shot) {
         );
     } else {
         window.global::<UpdateState>().set_version("".into());
+    }
+    let library_check = window.global::<LibraryCheck>();
+    match shot.check {
+        Some(tab) => {
+            library_check.invoke_show();
+            library_check.set_tab(tab);
+        }
+        None => library_check.set_open(false),
     }
     if shot.cover_picker {
         show_cover_picker(window);

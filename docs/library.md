@@ -37,7 +37,7 @@ path (see [Writing tags](#writing-tags)), and `Library::accept_change_set` (see
 
 ## Schema
 
-Version 13, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
+Version 14, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
 migrations; a database from a newer build is refused instead of being altered.
 Migrations run with foreign keys off (`Library::open` turns them on afterwards), so
 a migration that rebuilds a table, as version 12 rebuilds `change_sets` to widen
@@ -67,6 +67,7 @@ the CHECK on its kind, doesn't delete the rows that refer to it.
 | `track_labels` | Which track holds which label, and since when; deleting a label deletes its rows (version 12) |
 | `change_labels` | The labels a label set creates when accepted, and whether it did or found one of that name (version 12) |
 | `favourites` | The tracks the owner liked, one row each, and when (version 13; see [Favourites](#favourites)) |
+| `not_duplicates` | Duplicate groups the owner marked "Not duplicates": one row per track, with a group id shared by the tracks marked together (version 14; see [Library check](#library-check)) |
 
 Paths are stored as platform-native bytes (`src/path_codec.rs`), so file names that
 aren't valid UTF-8 keep working.
@@ -535,6 +536,40 @@ only. The agreed decisions are in the
 - **M3U export:** `Library::export_favourites` writes them newest first through the
   same writer as `export_playlist`.
 
+## Library check
+
+`src/check.rs`. What the Library check page lists: duplicate tracks, tracks with
+missing tags and albums without a cover. The agreed decisions are in the
+[library check spec](specs/2026-11-07-library-check.md).
+
+- **Read-only.** Every query only reads. The one thing the module writes is the
+  "Not duplicates" marks; it never touches a music file. A test checks that the
+  queries and the marks leave every music file's bytes and modification time, and
+  every other table, as they were; another checks the module's source and the
+  page's glue reach for no file system call.
+- **Duplicates** (`Library::duplicate_groups`): available tracks with a track artist
+  and a title the file holds (not the file-name fallback). Title and artist are
+  folded in Rust (Unicode NFKD, the accents of the diacritical mark blocks dropped,
+  lower case, recomposed, runs of white space made one), since SQLite folds only
+  ASCII. Other marks stay, so the Japanese voicing marks keep "ga" apart from "ka". Tracks with the same folded pair
+  are sorted by length, and a group runs on while each track is at most 2 s longer
+  than the one before (`DUPLICATE_WINDOW`), so a group can span more than 2 s.
+  Groups of one are dropped; groups come by artist, then title.
+- **"Not duplicates"** (`mark_not_duplicates`) stores the group's track ids under a
+  new group id. A group the check finds is `hidden` while every one of its tracks is
+  in one stored group: a copy going missing keeps it hidden, a new copy shows it
+  again. `unmark_not_duplicates` forgets every stored group that holds all the
+  tracks given. Track ids outlive moved files, like favourites.
+- **Missing tags** (`missing_tags`): available tracks lacking a title, artist, album,
+  track number or year, grouped by album in library order (`AlbumGaps`). The title
+  is missing when `track_tags` holds no non-blank `TrackTitle` item: `tracks.title`
+  always has a value, the file name when the file holds no title. The other four
+  are their `tracks` columns being empty.
+- **Missing covers** (`albums_without_cover`): albums with available tracks, not an
+  Unknown album, whose artwork state says a scan looked and found none
+  (`artwork_state = 2`), and that have no fetched cover. Albums a scan hasn't looked
+  at yet are left out until one has.
+
 ## Measured
 
 The library used below has 3,621 tracks, 127 GB, mostly FLAC, on an NTFS hard disk
@@ -657,3 +692,9 @@ cargo run --release -p vcmp-library --example scan_profile -- /path/to/music
   every label, and nothing in the files can bring them back.
 - The owner's own label edits keep no history and can't be undone; only agents'
   label sets can.
+- The Library check folds accents by Unicode decomposition, so letters that don't
+  decompose ("o" with a stroke, the German sharp s) don't match their plain forms,
+  and live or remastered versions with the same title and artist within 2 s show as
+  duplicates until marked "Not duplicates". The same album in FLAC and MP3 already
+  merges into one album with doubled tracks, so each of its tracks shows as a
+  duplicate.

@@ -624,7 +624,7 @@ fn a_database_from_version_11_keeps_its_change_sets() {
     // can't be of kind 'labels'.
     let conn = rusqlite::Connection::open(&db).unwrap();
     conn.execute_batch(
-        "UPDATE change_sets SET kind = 'tags'; DROP TABLE favourites;
+        "UPDATE change_sets SET kind = 'tags'; DROP TABLE not_duplicates; DROP TABLE favourites;
          DROP TABLE change_labels; DROP TABLE track_labels; DROP TABLE labels;
          PRAGMA user_version = 11;",
     )

@@ -4,7 +4,8 @@
 //!
 //! The database is a cache of the files' tags (the files are the source of truth) plus
 //! what only VCMP knows: source directories, settings, labels, favourites, the plays
-//! waiting for Last.fm and the change sets AI agents asked for. Music files are written only by
+//! waiting for Last.fm, the change sets AI agents asked for and the duplicate groups
+//! the owner marked "Not duplicates". Music files are written only by
 //! [`Library::write_tags`] and [`Library::accept_change_set`], through a verified
 //! copy.
 
@@ -12,6 +13,7 @@ pub mod animation;
 mod artist_photos;
 mod artwork;
 mod changes;
+mod check;
 mod edit;
 mod error;
 mod favourites;
@@ -38,6 +40,7 @@ pub use changes::{
     CHANGE_SETS_KEPT, ChangeKind, ChangeSet, ChangeSetId, ChangeSetSummary, ChangeStatus,
     ChangedFile, FileResult, LabelEdit, NewLabel, ProposedLabel, ValueChange,
 };
+pub use check::{AlbumGaps, DUPLICATE_WINDOW, DuplicateGroup, MissingFields, TrackGaps};
 pub use edit::{FieldEdit, InvalidTagEdit, TagEdit, TagField, TagWriteError};
 pub use error::{Error, Result};
 pub use favourites::{Favourite, FavouritesSummary};

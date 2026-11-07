@@ -77,6 +77,21 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
       image editor: the new cover shows.
 - [ ] Remove a music folder: its albums go, and playlist entries from it stay,
       dimmed.
+- [ ] Settings → Library check → Check library…: the page opens with three tabs and
+      their counts. Back, Escape, the mouse's back button and the Settings entry in
+      the sidebar all return to Settings; the forward button opens the check again.
+- [ ] Copy a track into a second folder (on a `VCMP_HOME` library of copies): it
+      shows under Duplicates with both paths. Play plays both, one after the other.
+      Not duplicates hides the group; the switch shows it again, and Show again
+      brings it back. Copy it a third time: the group shows again with three.
+- [ ] Missing tags: a track without a title tag shows "No title" (its file name as
+      the title). The album block's Edit tags… opens the editor for the listed
+      tracks; save a year, and the tracks leave the list.
+- [ ] Missing covers: Find cover online opens the picker over the page; pick a
+      cover and the album leaves the list.
+- [ ] Show in the file manager opens the file manager with the file selected
+      (on Linux, try Nautilus or Dolphin; another file manager may open the folder
+      only).
 
 ### Playback
 
@@ -540,6 +555,9 @@ Use a library of copied files (`VCMP_HOME`, see CLAUDE.md): accepting writes tag
       with `vcmp.exe` and `mcp` lists vcmp's tools. **(never seen working)**
 - [ ] Last.fm keeps its key in Credential Manager across restarts.
 - [ ] Output device list shows the WASAPI device names.
+- [ ] Library check: Show in the file manager opens Explorer with the file
+      selected, for a path with spaces and one with accented letters.
+      **(never seen working)**
 - [ ] The `windows-x64.zip` from a release unpacks and `vcmp.exe` starts without
       a console window, after SmartScreen's More info → Run anyway.
 - [ ] The same for a `windows-x64.zip` from `packaging/release-local.sh`, built with
@@ -587,6 +605,8 @@ Use a library of copied files (`VCMP_HOME`, see CLAUDE.md): accepting writes tag
 - [ ] Claude Desktop with the entry Settings shows (`VCMP.app/Contents/MacOS/...`
       and `mcp`) lists vcmp's tools. **(never seen working)**
 - [ ] Last.fm keeps its key in the Keychain across restarts.
+- [ ] Library check: Show in the file manager reveals the file in the Finder.
+      **(never seen working)**
 - [ ] The `macos-arm64.zip` (or `macos-x64.zip`) unpacks to `VCMP.app`, which
       starts after System Settings → Privacy & Security → Open Anyway, and shows
       its icon.

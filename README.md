@@ -28,6 +28,9 @@ A player for the music files on your own drives, for Windows 10 and newer and Li
 - Favourites: like a track with the heart in a track list or the player bar, or a
   whole album from its menu. Liked tracks gather in a Favourites playlist, first
   among your playlists, newest first, which you can play, shuffle or export.
+- A library check in Settings lists duplicate tracks, tracks with missing tags and
+  albums without a cover, so you can play, edit or look them up. It never deletes
+  anything.
 - Finds missing album covers online (the Cover Art Archive, through MusicBrainz) and
   artist photos on fanart.tv. You can use your own pictures instead, and give
   playlists one too. An animated GIF, WebP or PNG plays on its album's, artist's or

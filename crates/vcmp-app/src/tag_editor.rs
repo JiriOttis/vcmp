@@ -179,6 +179,13 @@ impl TagEditor {
                 }
             });
         let weak = Rc::downgrade(&editor);
+        state.on_edit_files(move |paths| {
+            if let Some(editor) = weak.upgrade() {
+                let paths: Vec<String> = paths.iter().map(String::from).collect();
+                editor.edit_paths(&paths);
+            }
+        });
+        let weak = Rc::downgrade(&editor);
         state.on_edit_album(move || {
             if let Some(editor) = weak.upgrade() {
                 editor.edit_album();

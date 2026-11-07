@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
+use vcmp_integrations::file_manager;
 use vcmp_library::Library;
 
 use crate::theme::file::{self, Entry, Problem};
@@ -307,7 +308,8 @@ impl Themes {
 
     fn open_folder(&self) {
         let Some(folder) = &self.folder else { return };
-        let result = std::fs::create_dir_all(folder).and_then(|()| open_in_file_manager(folder));
+        let result =
+            std::fs::create_dir_all(folder).and_then(|()| file_manager::open_folder(folder));
         self.report(result.err().map(|error| error.to_string()));
     }
 
@@ -493,22 +495,6 @@ fn save_new(folder: &Path, stem: &str, text: &str) -> std::io::Result<String> {
         }
     }
     unreachable!("a free name is found before the numbers run out")
-}
-
-/// Opens the folder in the system's file manager.
-fn open_in_file_manager(folder: &Path) -> std::io::Result<()> {
-    let program = if cfg!(windows) {
-        "explorer"
-    } else if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    };
-    let mut child = std::process::Command::new(program).arg(folder).spawn()?;
-    // Explorer reports failure even when it opened the folder, so the status says
-    // nothing; waiting only reaps the process.
-    std::thread::spawn(move || child.wait());
-    Ok(())
 }
 
 #[cfg(test)]

@@ -139,6 +139,12 @@ fn main() -> Result<(), slint::PlatformError> {
                                 }
                             });
                             let player = Rc::downgrade(&service);
+                            view.check().on_play(move |tracks, origin, start| {
+                                if let Some(player) = player.upgrade() {
+                                    player.play_tracks(tracks, origin, start);
+                                }
+                            });
+                            let player = Rc::downgrade(&service);
                             tag_editor.on_written(move || {
                                 if let Some(player) = player.upgrade() {
                                     player.tags_changed();
