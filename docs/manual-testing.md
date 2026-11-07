@@ -264,6 +264,35 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
 - [ ] A 720 px wide window with a long title playing: the bar's heart and buttons
       all stay inside.
 
+### Play history **(never seen working)**
+
+- [ ] Fresh `VCMP_HOME`: Songs shows Title, Artist, Album, Year and Time. Right-click
+      a heading: a menu lists every column but Title, with checks on the ones shown.
+      Turn on Plays, Last played and Added: they appear after Time, and Added reads
+      "Today" for every track. Tab to a heading and press the Menu key (or
+      Shift+F10): the same menu opens.
+- [ ] Hide Artist: the edge after Title now resizes Title against Album. Hide
+      Album too: no edge is left, and Title takes the room. Restart: the same
+      columns show, and the widths come back when Artist and Album do.
+- [ ] Play a track for over half its length (or 4 minutes): its row's Plays turns
+      to 1 and Last played to "Today" without leaving the page. Skip another after
+      a few seconds, and seek far into a third: neither counts. A track with no
+      artist tag counts too. With Last.fm connected, a track with an artist is
+      scrobbled as before; with Last.fm disconnected, plays still count.
+- [ ] Sort by Plays, then again: most played first, never played last both ways.
+      Sort by Plays, then hide Plays: the table goes back to Title order.
+- [ ] Turn on Repeat One and let a track play twice: Plays goes up by two.
+- [ ] An existing library from before this version (copy a `VCMP_HOME`): after the
+      first scan, Added shows dates from the files, not the day of the first scan;
+      edit a track's mtime later and rescan: its date doesn't change again.
+- [ ] Leave Songs open over midnight with Last played shown: "Today" turns into
+      "Yesterday" within a minute; the same after the computer slept through it.
+- [ ] Settings, Playback, "Clear play history…": the dialog says what is lost.
+      Keep: nothing changes. Clear: every Plays is 0 and Last played empty; Added
+      stays, and plays waiting for Last.fm are still sent.
+- [ ] A 720 px window with every Songs column turned on: note how the text columns
+      fit; hiding a few gives them room back.
+
 ### Covers and artist photos
 
 - [ ] An album page's More button ("…" beside Shuffle) opens a menu below it, by

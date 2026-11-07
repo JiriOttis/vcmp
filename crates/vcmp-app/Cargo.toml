@@ -13,6 +13,8 @@ name = "vcmp"
 path = "src/main.rs"
 
 [dependencies]
+# Local calendar days for the Songs page's Last played and Added columns (src/days.rs).
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 directories = "6.0.0"
 env_logger = "0.11.11"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
@@ -45,6 +47,8 @@ dunce = "1.0.5"
 i-slint-backend-testing = "=1.18.1"
 lofty = "0.25.4"
 png = "0.18.1"
+# Reads the play log's origins in tests/play_history.rs.
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 tempfile = "3.27.0"
 vcmp-integrations = { path = "../vcmp-integrations" }
 

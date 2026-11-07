@@ -239,6 +239,7 @@ impl App {
         Event::TrackChanged(Some(NowPlaying {
             entry: QueueEntry::new(TrackRef::local(self.path(name))),
             duration: Some(Duration::from_secs(1)),
+            origin: None,
         }))
     }
 }
@@ -354,6 +355,7 @@ fn the_bar_marks_a_lossless_file_and_the_last_fm_play() {
         .handle_event(Event::TrackChanged(Some(NowPlaying {
             entry: app.entry("1.flac"),
             duration: Some(Duration::from_secs(100)),
+            origin: None,
         })));
     assert_eq!(app.state().get_lossless_format(), "FLAC");
     assert!(shown("Lossless (FLAC)"));
@@ -1747,6 +1749,7 @@ fn the_sleep_timer_counts_down_then_stops_after_the_track_playing() {
         .handle_event(Event::TrackChanged(Some(NowPlaying {
             entry: app.entry("2.flac"),
             duration: None,
+            origin: None,
         })));
     assert_eq!(app.state().get_sleep_timer(), SleepTimer::Off);
     assert_eq!(app.state().get_state(), PlayState::Stopped);

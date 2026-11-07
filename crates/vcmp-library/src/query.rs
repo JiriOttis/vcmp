@@ -2,7 +2,7 @@
 //! artists that still have some; a single track can be fetched regardless.
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, Row, params_from_iter};
 
@@ -36,6 +36,9 @@ pub struct Track {
     pub year: Option<i32>,
     pub genre: Option<String>,
     pub duration: Duration,
+    /// When VCMP first saw the file; for tracks already in the library before play
+    /// history, the earlier of the file's creation and modification time.
+    pub added: SystemTime,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -85,7 +88,8 @@ pub(crate) enum TrackFilter {
 
 pub(crate) const TRACK_COLUMNS: &str =
     "t.id, t.path, t.available, t.format, t.title, t.artist, t.artist_id, t.album,
-    t.album_id, t.album_artist, t.track_number, t.disc_number, t.year, t.genre, t.duration_ms";
+    t.album_id, t.album_artist, t.track_number, t.disc_number, t.year, t.genre, t.duration_ms,
+    t.added_ms";
 
 pub(crate) fn track_from(row: &Row) -> rusqlite::Result<Track> {
     Ok(Track {
@@ -104,7 +108,13 @@ pub(crate) fn track_from(row: &Row) -> rusqlite::Result<Track> {
         year: row.get(12)?,
         genre: row.get(13)?,
         duration: Duration::from_millis(row.get::<_, i64>(14)?.max(0) as u64),
+        added: time_from_ms(row.get(15)?),
     })
+}
+
+/// A Unix time in milliseconds as stored in the database.
+pub(crate) fn time_from_ms(ms: i64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_millis(ms.max(0) as u64)
 }
 
 pub(crate) fn tracks(conn: &Connection, filter: TrackFilter) -> Result<Vec<Track>> {

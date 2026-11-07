@@ -526,7 +526,11 @@ impl Engine {
                     });
                     self.decoder = Some(stream);
                     if announce {
-                        self.emit(Event::TrackChanged(Some(NowPlaying { entry, duration })));
+                        self.emit(Event::TrackChanged(Some(NowPlaying {
+                            entry,
+                            duration,
+                            origin: self.current_origin(),
+                        })));
                     }
                     self.emit(Event::Position(offset));
                     self.last_position = Instant::now();
@@ -568,8 +572,14 @@ impl Engine {
         self.emit(Event::TrackChanged(Some(NowPlaying {
             entry: next,
             duration: None,
+            origin: self.current_origin(),
         })));
         self.emit(Event::Position(Duration::ZERO));
+    }
+
+    /// The origin [`NowPlaying`] carries for the queue's current track.
+    fn current_origin(&self) -> Option<String> {
+        self.queue.current_origin().map(str::to_owned)
     }
 
     /// Decodes a little and moves audio towards the ring. False when there was
@@ -724,7 +734,11 @@ impl Engine {
                 .advance(Advance::Ended)
                 .cloned()
                 .unwrap_or_else(|| segment.entry.clone());
-            self.emit(Event::TrackChanged(Some(NowPlaying { entry, duration })));
+            self.emit(Event::TrackChanged(Some(NowPlaying {
+                entry,
+                duration,
+                origin: self.current_origin(),
+            })));
             self.emit_queue();
             self.last_position = Instant::now();
             if self.decoder.is_none() && self.end_at.is_none() {

@@ -1199,6 +1199,7 @@ mod tests {
             year: Some(1999),
             genre: None,
             duration: Duration::ZERO,
+            added: std::time::UNIX_EPOCH,
         };
         let shown = edited(
             &track,

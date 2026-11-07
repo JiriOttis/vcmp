@@ -3,8 +3,8 @@
 //! crate.
 //!
 //! The database is a cache of the files' tags (the files are the source of truth) plus
-//! what only VCMP knows: source directories, settings, labels, favourites, the plays
-//! waiting for Last.fm and the change sets AI agents asked for. Music files are written only by
+//! what only VCMP knows: source directories, settings, labels, favourites, the play
+//! history, the plays waiting for Last.fm and the change sets AI agents asked for. Music files are written only by
 //! [`Library::write_tags`] and [`Library::accept_change_set`], through a verified
 //! copy.
 
@@ -21,6 +21,7 @@ mod m3u;
 mod other_tags;
 mod path_codec;
 mod playlists;
+mod plays;
 mod query;
 mod scan;
 mod schema;
@@ -45,6 +46,7 @@ pub use labels::{LABEL_NAME_MAX, LABEL_PALETTE, Label, LabelId, valid_label_colo
 pub use lookups::{CoverArtId, CoverLookup};
 pub use m3u::{M3uExport, m3u_file_name};
 pub use playlists::{Playlist, PlaylistEntry, PlaylistId};
+pub use plays::PlayStats;
 pub use query::{Album, AlbumId, Artist, ArtistId, SearchResults, Track, TrackId};
 pub use scan::{ScanPhase, ScanProgress, ScanReport, SkippedFile};
 pub use scrobbles::{QueuedScrobble, Scrobble};
@@ -57,6 +59,11 @@ use error::io_error;
 /// Setting key: rescan at startup and watch the source directories for changes.
 /// Stored as "true" or "false"; absent means true.
 pub const SETTING_AUTO_UPDATE: &str = "library.auto_update";
+
+/// Setting key: the tracks already in the library before play history had their
+/// added dates taken from their files ("true"). Absent until the first scan after
+/// that migration, which does it once.
+pub const SETTING_ADDED_BACKFILLED: &str = "library.added_backfilled";
 
 /// What [`Library::write_tags`] did.
 #[derive(Debug, Default)]

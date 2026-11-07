@@ -16,6 +16,24 @@ export global ColumnWidths {
     callback save();
 }
 
+// The songs table's columns that show; the title always does. The menu on its
+// headings turns them on and off, and src/preferences.rs loads and saves them. A
+// hidden text column keeps its share in `ColumnWidths` for when it comes back.
+export global SongColumns {
+    in-out property <bool> artist: true;
+    in-out property <bool> album: true;
+    // Shown only while any label exists, as well.
+    in-out property <bool> labels: true;
+    in-out property <bool> year: true;
+    in-out property <bool> duration: true;
+    in-out property <bool> plays: false;
+    in-out property <bool> last-played: false;
+    in-out property <bool> added: false;
+    // A column was turned on or off: the choice is saved, and a table sorted by a
+    // column now hidden goes back to the titles' order.
+    callback toggled();
+}
+
 // The edge between two resizable columns, laid over the gap between their headings.
 // Dragging it, or Left and Right while it has the focus, moves room from one column
 // to the other; a double-click shares the room evenly. `first` and `second` are the

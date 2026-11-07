@@ -378,6 +378,7 @@ fn the_player_bar_and_the_queue_show_the_playing_tracks_heart() {
         .handle_event(Event::TrackChanged(Some(NowPlaying {
             entry: app.entry("1.flac"),
             duration: None,
+            origin: None,
         })));
     mock_elapsed_time(Duration::ZERO);
     let state = app.window.global::<PlayerState>();

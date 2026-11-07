@@ -240,6 +240,7 @@ mod tests {
             year: None,
             genre: None,
             duration: Duration::ZERO,
+            added: std::time::UNIX_EPOCH,
         }
     }
 

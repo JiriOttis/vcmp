@@ -1,8 +1,8 @@
 //! Appearance preferences kept in the library database's settings table: reduced
 //! motion, the zoom, whether the queue panel is open, which artists the Artists page
-//! lists, and the column widths of the track lists and the songs table. Also hands
-//! the operating system's reduce-motion setting to the theme. The theme itself is
-//! saved by `src/themes.rs`.
+//! lists, the column widths of the track lists and the songs table, and which of the
+//! songs table's columns show. Also hands the operating system's reduce-motion
+//! setting to the theme. The theme itself is saved by `src/themes.rs`.
 
 use std::rc::Rc;
 
@@ -10,7 +10,7 @@ use slint::ComponentHandle;
 use vcmp_integrations::reduce_motion;
 use vcmp_library::Library;
 
-use crate::{AppWindow, ColumnWidths, ReduceMotion, Theme, zoom};
+use crate::{AppWindow, ColumnWidths, ReduceMotion, SongColumn, SongColumns, Theme, zoom};
 
 /// "system", "on" or "off"; see `parse_motion` for the older "true" and "false".
 pub const REDUCED_MOTION: &str = "ui.reduced_motion";
@@ -22,6 +22,22 @@ pub const ARTISTS_ALL: &str = "ui.artists_all";
 pub const TRACK_COLUMNS: &str = "ui.track_columns";
 /// The songs table's column shares: title, artist, album.
 pub const SONG_COLUMNS: &str = "ui.song_columns";
+/// The songs table's columns that show, by name, separated by spaces (see
+/// `HIDEABLE`); absent: all but plays, last played and added.
+pub const SONG_COLUMNS_SHOWN: &str = "ui.song_columns_shown";
+
+/// The songs table's columns that can be hidden, by their saved names, in the order
+/// of `shown_columns`.
+const HIDEABLE: [&str; 8] = [
+    "artist",
+    "album",
+    "labels",
+    "year",
+    "duration",
+    "plays",
+    "last_played",
+    "added",
+];
 
 /// Applies the saved preferences, then saves them whenever the user changes them.
 pub fn connect(window: &AppWindow, library: Rc<Library>) -> vcmp_library::Result<()> {
@@ -79,6 +95,24 @@ pub fn connect(window: &AppWindow, library: Rc<Library>) -> vcmp_library::Result
         }
     });
 
+    let song_columns = window.global::<SongColumns>();
+    if let Some(saved) = library.setting(SONG_COLUMNS_SHOWN)? {
+        show_columns(&song_columns, parse_shown(&saved));
+    }
+    let weak = window.as_weak();
+    let saving = library.clone();
+    song_columns.on_toggled(move || {
+        let Some(window) = weak.upgrade() else { return };
+        let columns = window.global::<SongColumns>();
+        let shown = format_shown(shown_columns(&columns));
+        if let Err(error) = saving.set_setting(SONG_COLUMNS_SHOWN, &shown) {
+            log::warn!("could not save the songs table's columns: {error}");
+        }
+        if !column_shown(&columns, window.get_songs_sort_column()) {
+            window.invoke_sort_songs(SongColumn::Title);
+        }
+    });
+
     let weak = window.as_weak();
     theme.on_preferences_changed(move || {
         let Some(window) = weak.upgrade() else { return };
@@ -123,6 +157,68 @@ fn shares<const N: usize>(saved: &str) -> Option<[f32; N]> {
     values.try_into().ok()
 }
 
+fn shown_columns(columns: &SongColumns) -> [bool; 8] {
+    [
+        columns.get_artist(),
+        columns.get_album(),
+        columns.get_labels(),
+        columns.get_year(),
+        columns.get_duration(),
+        columns.get_plays(),
+        columns.get_last_played(),
+        columns.get_added(),
+    ]
+}
+
+fn column_shown(columns: &SongColumns, column: SongColumn) -> bool {
+    match column {
+        SongColumn::Title => true,
+        SongColumn::Artist => columns.get_artist(),
+        SongColumn::Album => columns.get_album(),
+        SongColumn::Year => columns.get_year(),
+        SongColumn::Duration => columns.get_duration(),
+        SongColumn::Plays => columns.get_plays(),
+        SongColumn::LastPlayed => columns.get_last_played(),
+        SongColumn::Added => columns.get_added(),
+    }
+}
+
+fn show_columns(columns: &SongColumns, shown: [bool; 8]) {
+    let [
+        artist,
+        album,
+        labels,
+        year,
+        duration,
+        plays,
+        last_played,
+        added,
+    ] = shown;
+    columns.set_artist(artist);
+    columns.set_album(album);
+    columns.set_labels(labels);
+    columns.set_year(year);
+    columns.set_duration(duration);
+    columns.set_plays(plays);
+    columns.set_last_played(last_played);
+    columns.set_added(added);
+}
+
+/// The saved names of the shown columns; a name not known is left out.
+fn parse_shown(saved: &str) -> [bool; 8] {
+    HIDEABLE.map(|name| saved.split_whitespace().any(|word| word == name))
+}
+
+fn format_shown(shown: [bool; 8]) -> String {
+    HIDEABLE
+        .iter()
+        .zip(shown)
+        .filter(|(_, shown)| *shown)
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn motion_name(choice: ReduceMotion) -> &'static str {
     match choice {
         ReduceMotion::System => "system",
@@ -156,6 +252,22 @@ mod tests {
         assert_eq!(shares::<2>("0.7 -1"), None);
         assert_eq!(shares::<2>("0.7 NaN"), None);
         assert_eq!(shares::<2>("wide narrow"), None);
+    }
+
+    #[test]
+    fn shown_song_columns_are_read_back() {
+        let shown = [true, false, true, true, false, true, false, true];
+        assert_eq!(
+            format_shown(shown),
+            "artist labels year plays added",
+            "by name"
+        );
+        assert_eq!(parse_shown(&format_shown(shown)), shown);
+        assert_eq!(parse_shown(""), [false; 8], "only the title");
+        assert_eq!(
+            parse_shown("album someday"),
+            [false, true, false, false, false, false, false, false]
+        );
     }
 
     #[test]

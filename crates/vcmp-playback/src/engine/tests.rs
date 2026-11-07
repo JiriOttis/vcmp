@@ -413,6 +413,39 @@ fn play_next_replaces_the_prepared_track() {
 }
 
 #[test]
+fn a_track_names_its_context_unless_it_came_from_up_next() {
+    let mut h = Harness::new(CD);
+    let (a, b, inserted) = (file("a", "flac"), file("b", "flac"), file("a", "wav"));
+    h.send(Command::PlayContext {
+        entries: vec![a.clone(), b.clone()],
+        origin: Some("album:7".into()),
+        start: None,
+    });
+    h.wait_until_buffered(TOTAL);
+    h.send(Command::PlayNext(vec![inserted.clone()]));
+    h.wait_for(
+        "queue change",
+        |e| matches!(e, Event::QueueChanged(view) if view.up_next.len() == 1),
+    );
+    h.play_to_end();
+    h.wait_for_track(None);
+    let origins: Vec<(QueueEntry, Option<String>)> = h
+        .seen
+        .iter()
+        .filter_map(|(event, _)| match event {
+            Event::TrackChanged(Some(now)) => Some((now.entry.clone(), now.origin.clone())),
+            _ => None,
+        })
+        .collect();
+    let album = Some("album:7".to_string());
+    assert_eq!(
+        origins,
+        [(a, album.clone()), (inserted, None), (b, album)],
+        "the inserted track came from Up next"
+    );
+}
+
+#[test]
 fn a_track_added_after_the_end_was_decoded_still_follows_gaplessly() {
     let mut h = Harness::new(CD);
     let (a, b) = (file("a", "flac"), file("b", "flac"));

@@ -2,6 +2,7 @@ import { AboutSlint, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Button, Dropdown, FocusRing, ScrollArea, SearchField, SectionHeading, SegmentedChoice, SettingRow, TextLink, Toggle } from "components.slint";
 import { Setup } from "setup.slint";
+import { Confirmation } from "confirmation.slint";
 import { LibraryState } from "library-state.slint";
 import { AddFolderButton, LibrarySection } from "library-settings.slint";
 import { LastfmRow } from "lastfm-settings.slint";
@@ -149,6 +150,31 @@ export component SettingsPage inherits Page {
         if PlayerState.discord-available: DiscordRow { }
 
         if LastfmState.available: LastfmRow { }
+
+        SettingRow {
+            title: @tr("Play history");
+            description: @tr("The play counts and last played dates in Songs come from every play VCMP has counted.");
+
+            // Asks first, in a dialog (`Confirmation`).
+            Button {
+                property <bool> asked;
+                property <int> answers: Confirmation.answers;
+                changed answers => {
+                    if self.asked {
+                        self.asked = false;
+                        if Confirmation.accepted {
+                            PlayerState.clear-play-history();
+                        }
+                        self.focus();
+                    }
+                }
+                text: @tr("Clear play history…");
+                clicked => {
+                    self.asked = true;
+                    Confirmation.ask(@tr("Clear the play history?"), @tr("Every play count and last played date is deleted, and this can't be undone. Plays waiting to be scrobbled and the dates tracks were added stay."), @tr("Clear history"), @tr("Clear play history"), @tr("Keep the play history"));
+                }
+            }
+        }
     }
 
     // Only in builds that can search fanart.tv at all.
