@@ -3,13 +3,13 @@
 Spec: docs/specs/2026-11-07-play-history.md
 Date: 2026-11-07
 Status: implemented
-Area: vcmp-library (schema 14, `plays.rs`, scan backfill, `Track::added`),
+Area: vcmp-library (schema 15, `plays.rs`, scan backfill, `Track::added`),
 vcmp-playback (`NowPlaying.origin`), vcmp-app (play counting, Songs columns and
 header menu, Settings), docs
 
 ## What was done
 
-- **Library:** migration 14 adds `plays` (track, start time, origin text) with
+- **Library:** migration 15 adds `plays` (track, start time, origin text) with
   indexes on (track, time) and time. `src/plays.rs` records a play, reads counts and
   last played over all time or since a moment, one track's stats, and clears the
   log. `Track` gains `added`; the scanner backfills existing rows once from file

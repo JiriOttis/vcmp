@@ -136,7 +136,7 @@ impl Library {
                 let blank = |text: &Option<String>| text.as_deref().is_none_or(is_blank);
                 Ok(TrackGaps {
                     missing: MissingFields {
-                        title: row.get(15)?,
+                        title: row.get(16)?,
                         artist: blank(&track.artist),
                         album: blank(&track.album),
                         track_number: track.track_number.is_none(),
@@ -305,6 +305,7 @@ mod tests {
             year: None,
             genre: None,
             duration: Duration::from_millis(millis),
+            added: std::time::UNIX_EPOCH,
         }
     }
 

@@ -16,9 +16,9 @@ log = "0.4.34"
 notify = "8.2.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 tempfile = "3.27.0"
-unicode-normalization = "0.1.26"
 thiserror = "2.0.21"
-# Matching M3U entries by their tags ignores diacritics, and reads `file:` URLs.
+# Matching M3U entries by their tags ignores diacritics, as does the library check's
+# duplicate finder; url reads `file:` URLs.
 unicode-normalization = "0.1.26"
 url = "2.5.8"
 walkdir = "2.5.0"

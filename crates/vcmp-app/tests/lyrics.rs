@@ -88,7 +88,9 @@ struct App {
 
 /// A window with one album of two tracks, settings applied by `prepare`.
 fn start(prepare: impl FnOnce(&Library)) -> App {
-    i_slint_backend_testing::init_no_event_loop();
+    // Once per test thread: a test that starts VCMP again would set the platform twice.
+    thread_local!(static BACKEND: () = i_slint_backend_testing::init_no_event_loop());
+    BACKEND.with(|_| {});
     let dir = tempfile::tempdir().unwrap();
     let music = dunce::canonicalize(dir.path()).unwrap().join("music");
     add(&music, "1.flac", Song::new("Opening", "Band", "Record"));
@@ -181,6 +183,7 @@ impl App {
             .handle_event(Event::TrackChanged(Some(NowPlaying {
                 entry: QueueEntry::new(TrackRef::local(path.to_str().unwrap())),
                 duration: Some(Duration::from_secs(1)),
+                origin: None,
             })));
         assert_eq!(
             self.reads.take(),

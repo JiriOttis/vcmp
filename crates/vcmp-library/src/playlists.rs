@@ -326,9 +326,9 @@ fn insert_entries(conn: &Connection, id: PlaylistId, tracks: &[TrackId]) -> Resu
 }
 
 /// `name`, or the first of `name 2`, `name 3`, ... that no playlist has, ignoring
-/// case as the database does.
+/// case as the playlist list's order does.
 fn free_name(conn: &Connection, name: &str) -> Result<String> {
-    let mut taken = conn.prepare("SELECT 1 FROM playlists WHERE name = ?1")?;
+    let mut taken = conn.prepare("SELECT 1 FROM playlists WHERE name = ?1 COLLATE NOCASE")?;
     let mut candidate = name.to_owned();
     let mut number = 1;
     while taken.exists([&candidate])? {

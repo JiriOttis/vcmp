@@ -11,7 +11,7 @@ player bar, Settings, setup wizard)
 - **vcmp-library** (`src/lyrics.rs`): the lyrics model, the LRC parser, reading SYLT,
   USLT and the Vorbis lyrics fields plus the `.lrc` file at play time, the priority
   function `choose_lyrics`, and the LRCLIB cache (`lyrics_lookups`, schema version
-  14) with `lyrics_lookup_due` for the "same question" and 30-day miss rules.
+  16) with `lyrics_lookup_due` for the "same question" and 30-day miss rules.
 - **vcmp-integrations** (`src/lrclib.rs`): the LRCLIB client and `LyricsFinder`, a
   worker that makes one request at a time, keeps only the latest waiting job and
   spaces requests 300 ms apart.

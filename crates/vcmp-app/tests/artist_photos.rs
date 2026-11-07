@@ -326,6 +326,10 @@ fn a_personal_key_is_kept_and_goes_with_each_search() {
 
 /// Whether Settings shows the personal key field.
 fn key_field_shown(app: &App) -> bool {
+    // Tall enough for the Artist photos section: the finder skips what is out of view.
+    app.window
+        .window()
+        .set_size(LogicalSize::new(1100.0, 2400.0));
     app.window.set_selected_index(7);
     app.frame();
     ElementHandle::find_by_accessible_label(&app.window, "fanart.tv personal API key")

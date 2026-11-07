@@ -20,7 +20,7 @@ fn open_window() -> AppWindow {
     window.show().expect("show");
     // Tall enough for the whole Settings page: the finder skips what is scrolled out
     // of view.
-    window.window().set_size(LogicalSize::new(1100.0, 1600.0));
+    window.window().set_size(LogicalSize::new(1100.0, 2400.0));
     window
 }
 

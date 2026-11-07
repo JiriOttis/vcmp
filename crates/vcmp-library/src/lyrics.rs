@@ -577,7 +577,7 @@ mod tests {
                 line(11_500, "First"),
                 line(16_700, "Chorus with words"),
                 line(19_623, ""),
-                line(61_500, "Chorus with words"),
+                line(62_000, "Chorus with words"),
                 line(120_000, "Colon fraction"),
             ]
         );

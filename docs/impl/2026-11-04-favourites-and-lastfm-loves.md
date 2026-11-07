@@ -123,7 +123,7 @@ more tracks: `VCMP_HOME=target/fav cargo run -p vcmp-app`, then add a music fold
     After the last page the store likes the matches.
   - New reports: `Loved`, `ImportProgress`, `Imported`, `ImportFailed`.
 - **Library** (`crates/vcmp-library/src/loves.rs`, `favourites.rs`, `schema.rs`):
-  - Schema version 14 adds `love_queue`, unique by artist and title.
+  - Schema version 17 adds `love_queue`, unique by artist and title.
     `INSERT OR REPLACE` gives the newer entry a new id, so a love being sent as it
     is replaced isn't mistaken for the unlove that replaced it.
   - `like_at` likes tracks as of Last.fm's love dates and keeps earlier hearts.

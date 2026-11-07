@@ -80,8 +80,8 @@ Nothing - the spec is implemented in full; its tests are written but not run.
   rows in view as the songs table does.
 - Accent folding covers the diacritical mark blocks only; letters that don't
   decompose (o with a stroke, sharp s) don't match their plain forms.
-- Migration 14 collides with any other branch adding a migration that merges
-  first; renumber before merging.
+- Merged first of the schema PRs, so it kept migration 14 (play history took 15,
+  lyrics 16 and Last.fm loves 17).
 - "Show in the file manager" on Windows and macOS has never been run, and on Linux
   only file managers that answer `FileManager1` select the file.
 
