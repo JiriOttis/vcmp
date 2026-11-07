@@ -40,9 +40,9 @@ Workspace layout:
 | Crate | Role |
 |---|---|
 | `crates/vcmp-app` | Binary `vcmp`: the Slint UI (`ui/`) and its Rust glue (`src/`) |
-| `crates/vcmp-library` | Source directories, scanning, tags (reading every tag, writing any), SQLite database, artwork cache, search, playlists and their M3U export and import, labels, favourites, play history, change sets agents ask for (review, undo, retention), the library check (duplicates, missing tags and covers), watcher |
+| `crates/vcmp-library` | Source directories, scanning, tags (reading every tag, writing any), SQLite database, artwork cache, search, playlists and their M3U export and import, labels, favourites, play history, lyrics (read from tags and `.lrc` files, LRCLIB's answers cached), change sets agents ask for (review, undo, retention), the library check (duplicates, missing tags and covers), watcher |
 | `crates/vcmp-playback` | Playback engine: decoding, output and devices, gapless, queue, shuffle ([docs/playback.md](docs/playback.md)) |
-| `crates/vcmp-integrations` | OS media controls, the OS reduce-motion setting, the file manager (showing a file selected), Discord Rich Presence and its MusicBrainz cover lookup, cover search for "Find cover online", artist photos from fanart.tv, the update check, Last.fm scrobbling |
+| `crates/vcmp-integrations` | OS media controls, the OS reduce-motion setting, the file manager (showing a file selected), Discord Rich Presence and its MusicBrainz cover lookup, cover search for "Find cover online", artist photos from fanart.tv, lyrics from LRCLIB, the update check, Last.fm scrobbling |
 | `crates/vcmp-mcp` | The MCP server AI agents connect to: its tools, the token and Origin checks; changes go to the app through its `Changes` trait, playback through its `Playback` trait |
 
 The core crates must never depend on `vcmp-app` or Slint.

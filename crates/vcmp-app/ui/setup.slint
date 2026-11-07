@@ -5,7 +5,7 @@ import { LibrarySection } from "library-settings.slint";
 import { LastfmRow } from "lastfm-settings.slint";
 import { LastfmState } from "lastfm-state.slint";
 import { PlayerState } from "player-state.slint";
-import { DiscordRow, MotionRow, ZoomRow } from "setting-rows.slint";
+import { DiscordRow, LyricsOnlineRow, MotionRow, ZoomRow } from "setting-rows.slint";
 import { ThemeRows } from "themes.slint";
 import { UpdateCheckRow } from "updates.slint";
 import { PhotoKeyRow, PhotoSearch } from "photo-picker.slint";
@@ -221,6 +221,7 @@ export component SetupWizard inherits Modal {
                         self.focus();
                     }
                 }
+                LyricsOnlineRow { }
                 if LastfmState.available: LastfmRow { }
                 UpdateCheckRow {
                     property <int> wrap: root.wrap-first;

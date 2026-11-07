@@ -59,6 +59,8 @@ struct Shot {
     tabs: usize,
     // The now playing view is open over the page.
     now_playing: bool,
+    // It shows synced lyrics, the third line playing.
+    lyrics: bool,
     // The Last.fm row in Settings, as in a build with an API key, in this state.
     lastfm: Option<LastfmStatus>,
     // A newer VCMP is reported, so its note shows.
@@ -115,6 +117,7 @@ const fn shot(
         album,
         tabs,
         now_playing: false,
+        lyrics: false,
         lastfm: None,
         update: false,
         cover_picker: false,
@@ -210,6 +213,13 @@ const fn now_playing(name: &'static str, theme: &'static str) -> Shot {
     }
 }
 
+const fn lyrics(name: &'static str, theme: &'static str) -> Shot {
+    Shot {
+        lyrics: true,
+        ..now_playing(name, theme)
+    }
+}
+
 const fn lastfm(name: &'static str, theme: &'static str, status: LastfmStatus) -> Shot {
     Shot {
         lastfm: Some(status),
@@ -297,6 +307,8 @@ const SHOTS: &[Shot] = &[
     queue_edge("queue-edge-dark", "dark"),
     now_playing("now-playing-light", "light"),
     now_playing("now-playing-dark", "dark"),
+    lyrics("now-playing-lyrics-light", "light"),
+    lyrics("now-playing-lyrics-dark", "dark"),
     sleep("sleep-timer-light", "light"),
     sleep("sleep-timer-dark", "dark"),
     cover_picker("cover-picker-light", "light"),
@@ -392,6 +404,19 @@ fn press(window: &AppWindow, key: Key) {
         .dispatch_event(WindowEvent::KeyReleased { text });
 }
 
+/// Stand-in synced lines for the lyrics shots.
+const LYRICS: &[&str] = &[
+    "Morning comes in slow and grey",
+    "Coffee cooling on the sill",
+    "Every song I meant to play",
+    "Waiting in the quiet still",
+    "",
+    "Turn it up and let it ring",
+    "Through the hallway, down the stairs",
+    "All the small and certain things",
+    "Humming softly everywhere",
+];
+
 fn prepare(window: &AppWindow, shot: &Shot) {
     window.global::<Confirmation>().invoke_answer(false);
     window
@@ -400,6 +425,17 @@ fn prepare(window: &AppWindow, shot: &Shot) {
     window.set_selected_index(shot.page);
     let player = window.global::<PlayerState>();
     player.set_now_playing_open(shot.now_playing);
+    // Set directly: the shots read no lyrics.
+    player.set_has_lyrics(shot.lyrics);
+    player.set_lyrics_shown(shot.lyrics);
+    player.set_lyrics_synced(shot.lyrics);
+    player.set_lyrics_lines(ModelRc::new(VecModel::from(
+        LYRICS
+            .iter()
+            .map(|line| SharedString::from(*line))
+            .collect::<Vec<_>>(),
+    )));
+    player.set_lyrics_current(if shot.lyrics { 2 } else { -1 });
     // Set directly, so no timer runs while the shots are taken.
     player.set_sleep_timer(if shot.sleep {
         SleepTimer::Timed

@@ -9,7 +9,9 @@
 //! history; Last.fm gets it too when the track has an artist, and the track playing.
 //! The file the engine has open is passed on, so tag edits to it can wait for it.
 //! The sleep timer counts down here and then has the engine stop after the track
-//! playing at that moment. AI agents control playback through `agent_playback`.
+//! playing at that moment. AI agents control playback through `agent_playback`. The
+//! playing track's lyrics, read from its files or found on LRCLIB, and the line
+//! playing come from `lyrics`.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -38,8 +40,12 @@ use vcmp_integrations::media_controls::{self, Control, MediaControls, MediaState
 use vcmp_integrations::musicbrainz::{AlbumQuery, Cover, CoverFinder, Lookup};
 
 mod agent_playback;
+mod lyrics;
 
 pub use agent_playback::AppPlayback;
+pub use lyrics::{
+    LyricsReader, LyricsSearch, SETTING_LYRICS_ONLINE, SETTING_LYRICS_SHOWN, ThreadReader,
+};
 
 use crate::albums::initial;
 use crate::favourites;
@@ -224,6 +230,8 @@ pub struct PlayerService {
     // the last token handed out.
     syncs: RefCell<Vec<(u64, mpsc::Sender<()>)>>,
     last_sync: Cell<u64>,
+    // The playing track's lyrics, where they come from, and the line playing.
+    lyrics: lyrics::LyricsState,
 }
 
 /// Told the file the engine has open, or `None`.
@@ -298,6 +306,7 @@ impl PlayerService {
             sleep_minutes: Cell::new(0),
             syncs: RefCell::default(),
             last_sync: Cell::new(0),
+            lyrics: lyrics::LyricsState::default(),
         });
         SERVICE.with(|current| *current.borrow_mut() = Rc::downgrade(&service));
 
@@ -323,6 +332,7 @@ impl PlayerService {
         };
         state.set_discord_available(service.presence.is_some());
         state.set_discord(service.setting(SETTING_DISCORD).as_deref() != Some("false"));
+        service.connect_lyrics(&state);
         // Until the devices are listed, the chosen one is the only name known.
         service.set_output_devices(Ok(Vec::new()));
         state.set_volume(volume);
@@ -1434,6 +1444,7 @@ impl PlayerService {
                     PlaybackState::Stopped => PlayState::Stopped,
                 });
                 self.playing.set(playback == PlaybackState::Playing);
+                self.lyrics_playing(playback == PlaybackState::Playing);
                 if playback != PlaybackState::Playing {
                     self.announced.set(false);
                 }
@@ -1465,6 +1476,7 @@ impl PlayerService {
                 self.position.set(position);
                 show_position(&state, position);
                 self.count_play(position);
+                self.lyrics_position(position);
             }
             Event::QueueChanged(queue) => {
                 self.show_queue(&state, &queue);
@@ -1558,6 +1570,7 @@ impl PlayerService {
             state.set_has_artist_link(false);
             self.start_play(None, Duration::ZERO, None);
             self.update_presence();
+            self.lyrics_track_started(None, None, Duration::ZERO);
             return;
         };
         let path = now.entry.track.id.to_string();
@@ -1621,6 +1634,7 @@ impl PlayerService {
         self.position.set(Duration::ZERO);
         self.start_play(track.as_ref(), duration, origin);
         self.update_presence();
+        self.lyrics_track_started(Some(Path::new(&path)), track.as_ref(), duration);
 
         state.set_lossless_format(lossless_format(track.as_ref()).into());
         let id = track.as_ref().map(|track| track.id);
@@ -1680,6 +1694,7 @@ impl PlayerService {
         else {
             return;
         };
+        self.lyrics_tags_changed(&track);
         let album = track
             .album_id
             .and_then(|album| self.library.album(album).ok().flatten());
