@@ -642,7 +642,7 @@ cargo run --release -p vcmp-library --example scan_profile -- /path/to/music
 - lofty writes an MP4 number with as few bytes as it needs, so a number atom VCMP
   writes (`tmpo`, `stik`) may be shorter than the four bytes some players write.
 - An `.m4a` file holding chapter pictures as a video track (some enhanced podcasts)
-  counts as video and is skipped.
+  may count as video and be skipped.
 - Tag writing on M4A files goes through lofty's least tested writer.
   Run `examples/edit_check.rs` on copies of real files before relying on it; the
   read-back check refuses to replace a file that reads back wrong.

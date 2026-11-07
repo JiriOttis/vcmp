@@ -122,7 +122,7 @@ reading and writing, other tags, examples), vcmp-mcp (instructions), vcmp-app
 - AIFF-C with A-law or mu-law counts as lossless for the mark, though those
   encodings are lossy. Such files are rare.
 - An `.m4a` with chapter pictures in a video track (some enhanced podcasts) is
-  skipped as video.
+  may be skipped as video.
 - `stop_and_the_end_of_the_queue_clear_stop_after_the_current_track` failed once
   in four `vcmp-playback` runs, on a WAV file this change does not touch. It is a
   timing flake that predates this change.
