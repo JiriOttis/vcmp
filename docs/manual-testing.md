@@ -206,6 +206,29 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
     the paths are absolute.
   - Copy the music folder with the exported file in it to a phone, and open the
     playlist in its player: the relative paths find the files.
+- [ ] **(never seen working)** Import… on the Playlists page (a screen reader says
+      "Import playlist…") opens the file dialog for `.m3u` and `.m3u8`. Use a
+      `VCMP_HOME` library of copied files. On each of Windows, Linux and macOS:
+  - Import both files exported above: each comes back as a new playlist named
+    after the file, with " 2" (then " 3") when that name is taken, the same
+    entries in the same order, the track that is there twice included, and no
+    dialog.
+  - A playlist saved by VLC (Media → Save Playlist to File, `.m3u` and `.m3u8`;
+    VLC writes `file:///` URLs) and one saved by foobar2000 on Windows: every
+    entry that is in the library comes in.
+  - A playlist exported from a phone's player: its paths point at the phone, so
+    entries come in by their `#EXTINF` artist and title; the dialog lists those
+    that didn't, each with its title and, smaller, its path. Arrows, Page Up/Down,
+    Home and End scroll a long list; Escape, Close or a click beside it closes it,
+    and the playlist is there behind it.
+  - An old `.m3u` saved by a Windows player with accented names (é, ü): its
+    entries come in. One with Czech names (ř, ů) saved in CP1250 doesn't fully:
+    the known limit in `docs/library.md`.
+  - A file with nothing from the library (or an empty one): no playlist is made,
+    the dialog says "No playlist was imported", and closing it puts the focus back
+    on Import….
+  - A 720 px wide window: Import… and New playlist stay beside the title, inside
+    the window.
 
 ### Labels
 

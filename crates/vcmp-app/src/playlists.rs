@@ -1,5 +1,6 @@
 //! Playlists in the window: the Playlists page's grid, the playlist page, the list in
-//! the sidebar, the Add to playlist menus and exporting a playlist as an M3U file.
+//! the sidebar, the Add to playlist menus, and exporting a playlist as an M3U file or
+//! importing one.
 //! Reloaded after every library change, since an entry dims while its file is gone
 //! and comes back with it.
 //!
@@ -15,8 +16,8 @@ use std::rc::Rc;
 
 use slint::{ComponentHandle, Image, ModelRc, SharedString, VecModel};
 use vcmp_library::{
-    FavouritesSummary, Library, M3uExport, Playlist, PlaylistEntry, PlaylistId, Track, TrackId,
-    animation, m3u_file_name,
+    FavouritesSummary, Library, M3uExport, M3uImport, Playlist, PlaylistEntry, PlaylistId, Track,
+    TrackId, animation, m3u_file_name,
 };
 
 use crate::albums::{Card, CoverGrid, Grid, initial};
@@ -25,8 +26,8 @@ use crate::library_view::format_duration;
 use crate::moving_pictures::{self, Picture};
 use crate::selection;
 use crate::{
-    AlbumTile, AppWindow, Favourites, PlaylistDetail, Playlists, SongSelection, TrackRow,
-    TrackSelection,
+    AlbumTile, AppWindow, Favourites, PlaylistDetail, PlaylistImport, Playlists, SongSelection,
+    TrackRow, TrackSelection, UnmatchedEntry,
 };
 
 /// A playlist the playlist page can show: the favourites, or one of the library's.
@@ -39,8 +40,8 @@ pub enum PlaylistKey {
 /// Image files the picture chooser offers.
 const PICTURE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp"];
 
-/// Playlist file extensions the export's save dialog offers; the first is added to
-/// a name chosen without either.
+/// Playlist file extensions the export's save dialog and the import's open dialog
+/// offer; the first is added to an export's name chosen without either.
 const M3U_EXTENSIONS: &[&str] = &["m3u8", "m3u"];
 
 pub struct PlaylistBrowser {
@@ -60,6 +61,8 @@ pub struct PlaylistBrowser {
     // playlist, where the save dialog starts.
     exported: RefCell<Option<Exported>>,
     export_folder: RefCell<Option<PathBuf>>,
+    // The folder of the last file imported, where the open dialog starts.
+    import_folder: RefCell<Option<PathBuf>>,
 }
 
 /// What an export of the open playlist did, for its page.
@@ -89,6 +92,7 @@ impl PlaylistBrowser {
             picture_failed: Cell::default(),
             exported: RefCell::default(),
             export_folder: RefCell::default(),
+            import_folder: RefCell::default(),
         });
         browser.reload();
 
@@ -120,6 +124,12 @@ impl PlaylistBrowser {
                     browser.open(PlaylistKey::Playlist(id));
                 }
                 Err(error) => log::error!("could not make a playlist: {error}"),
+            }
+        });
+        let weak = Rc::downgrade(&browser);
+        window.on_import_playlist(move || {
+            if let Some(browser) = weak.upgrade() {
+                browser.choose_import_file();
             }
         });
         let weak = Rc::downgrade(&browser);
@@ -559,6 +569,70 @@ impl PlaylistBrowser {
         *self.export_folder.borrow_mut() = file.parent().map(Path::to_path_buf);
         *self.exported.borrow_mut() = Some(Exported { file, report });
         self.reload();
+    }
+
+    /// Asks for an M3U file, then imports it.
+    fn choose_import_file(self: &Rc<Self>) {
+        let mut dialog = rfd::AsyncFileDialog::new().add_filter("M3U", M3U_EXTENSIONS);
+        if let Some(folder) = self.import_folder.borrow().as_ref() {
+            dialog = dialog.set_directory(folder);
+        }
+        let weak = Rc::downgrade(self);
+        let chosen = slint::spawn_local(async move {
+            let Some(file) = dialog.pick_file().await else {
+                return;
+            };
+            if let Some(browser) = weak.upgrade() {
+                browser.import(file.path());
+            }
+        });
+        if let Err(error) = chosen {
+            log::error!("could not open the file dialog: {error}");
+        }
+    }
+
+    /// Makes a playlist of the library's tracks an M3U file lists and opens it. When
+    /// an entry matched nothing, nothing matched, or the file could not be read, the
+    /// report says so over the page.
+    pub fn import(&self, file: &Path) {
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        *self.import_folder.borrow_mut() = file.parent().map(Path::to_path_buf);
+        let fallback = window.global::<Playlists>().get_new_name();
+        let (failed, imported) = match self.library.import_playlist(file, &fallback) {
+            Ok(imported) => (false, imported),
+            Err(error) => {
+                log::error!("could not import {}: {error}", file.display());
+                (true, M3uImport::default())
+            }
+        };
+        if let Some(id) = imported.playlist {
+            self.reload();
+            self.open(PlaylistKey::Playlist(id));
+            if imported.unmatched.is_empty() {
+                return;
+            }
+        }
+        let unmatched: Vec<UnmatchedEntry> = imported
+            .unmatched
+            .iter()
+            .map(|entry| UnmatchedEntry {
+                title: entry.title.as_deref().unwrap_or_default().into(),
+                location: entry.location.as_str().into(),
+            })
+            .collect();
+        let report = window.global::<PlaylistImport>();
+        report.set_file(
+            file.file_name()
+                .map(|name| name.to_string_lossy().as_ref().into())
+                .unwrap_or_default(),
+        );
+        report.set_failed(failed);
+        report.set_name(imported.name.as_str().into());
+        report.set_entries(imported.entries as i32);
+        report.set_unmatched(ModelRc::new(VecModel::from(unmatched)));
+        report.set_open(true);
     }
 
     /// Adds the library's track at `path` to playlist `index`, or to a new playlist

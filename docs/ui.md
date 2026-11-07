@@ -15,7 +15,7 @@ DESIGN.md).
 | File | Holds |
 |---|---|
 | `ui/theme.slint` | `ThemePalette` struct, `ThemeKind` and `ReduceMotion` enums, `Theme` global: the chosen theme's colours and kind, spacing, radii, type sizes, target height, content, column and dialog widths, the detail pages' cover size, the zoom, durations, drag scrolling |
-| `ui/components.slint` | `FocusRing`, `MenuHost` (see "Menus over lists"), `ScrollArea` (every scrolling part but the album grid and the songs table, without a scroll bar), `EdgeScroll`, `NavItem`, `PlaylistLink`, `SegmentedChoice`, `Toggle`, `SettingRow`, `Button`, `IconButton`, `Dropdown`, `SearchField`, `TextField`, `ProgressBar`, `Modal` (the dialog frame of the tag editor, the pickers, the confirmation and the setup wizard) |
+| `ui/components.slint` | `FocusRing`, `MenuHost` (see "Menus over lists"), `ScrollArea` (every scrolling part but the album grid and the songs table, without a scroll bar), `EdgeScroll`, `NavItem`, `PlaylistLink`, `SegmentedChoice`, `Toggle`, `SettingRow`, `Button`, `IconButton`, `Dropdown`, `SearchField`, `TextField`, `ProgressBar`, `Modal` (the dialog frame of the tag editor, the pickers, the confirmation, the setup wizard and the import report) |
 | `ui/setup.slint` | `Setup` global and `SetupWizard`: the first-run setup wizard (see "Setup wizard") |
 | `src/setup.rs` | Whether the wizard opens at the start, and its `ui.setup_done` flag |
 | `ui/setting-rows.slint` | `DiscordRow`, `ZoomRow`, `MotionRow`: Settings rows the setup wizard shows too |
@@ -28,6 +28,7 @@ DESIGN.md).
 | `ui/picture.slint` | `PictureFrame`, `PictureSlot`, the `MovingPictures` global and `MovingPicture`: a detail page's or the now playing view's picture, which plays an animation's frames while in sight |
 | `src/moving_pictures.rs` | Decodes an animated picture's frames off the UI thread while it is in sight with motion allowed, and lets them go after |
 | `ui/playlist-state.slint` | `Playlists` global: the playlist names every Add to playlist menu lists |
+| `ui/playlist-import.slint` | `PlaylistImport` global, `UnmatchedEntry` and `PlaylistImportReport`: the dialog saying what an import of an M3U file left out |
 | `src/playlists.rs` | `PlaylistBrowser`: the playlist grid and page, the sidebar list, and the edits behind them |
 | `ui/artist-page.slint` | `ArtistView`: one artist's picture, albums and appearances |
 | `ui/songs-page.slint` | `SongTable`: every track with sortable columns, only the rows in view created |
@@ -448,6 +449,20 @@ the new view in too.
   the owner's playlists alone. New playlist makes "Playlist n" and opens it with the
   name field focused and selected, ready to be typed over. With no playlist of the
   owner's yet, the page says how to make one above the grid.
+- **Import…** (spoken "Import playlist…"; the short text keeps it and New playlist
+  beside the title on the narrowest page) opens the system's file dialog for `.m3u`
+  and `.m3u8` files, in the folder of the last import while VCMP runs. The file
+  becomes a new playlist named after it (how entries match is in
+  `docs/library.md`, "Playlists"), which opens. When every entry matched, that is
+  all. Otherwise a dialog (`PlaylistImportReport`) shows over it: "Imported as
+  “name”", how many entries were left out, and each of them: its `#EXTINF` text
+  ("Artist - Title") with the path as the file wrote it in a smaller, muted line
+  below, or the path alone, in the text style, without one. When nothing matched, no playlist
+  is made and the dialog over the grid says "No playlist was imported" and lists
+  every entry; an empty file or one that can't be read says that instead. The
+  focus starts on Close; Escape, Close or a click beside the card close it, and the
+  focus goes to the new playlist's back button or back to Import…. While the focus
+  is on Close, the arrows, Page Up, Page Down, Home and End scroll the list.
 - **A playlist's page** (`PlaylistView`) shows its picture, name, number of tracks,
   minutes of the tracks that can play and how many files are not found, then
   Play, Shuffle and a More button (a right click on it does the same) with

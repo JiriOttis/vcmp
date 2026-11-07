@@ -1,0 +1,176 @@
+import { Theme } from "theme.slint";
+import { Button, Modal, ScrollArea } from "components.slint";
+
+// An entry of an imported playlist file that matched no track of the library.
+export struct UnmatchedEntry {
+    // The "Artist - Title" its #EXTINF line gave; empty without one.
+    title: string,
+    // The path or URL as the file wrote it.
+    location: string,
+}
+
+// What the last "Import playlist…" did. Rust fills it and opens the report when an
+// entry didn't match, nothing did, or the file could not be read
+// (src/playlists.rs); when everything matched, the new playlist just opens.
+export global PlaylistImport {
+    in-out property <bool> open;
+    // The file's name, without its folder.
+    in property <string> file;
+    // The file could not be read.
+    in property <bool> failed;
+    // The playlist made; empty when none was.
+    in property <string> name;
+    // Entries in the file.
+    in property <int> entries;
+    in property <[UnmatchedEntry]> unmatched;
+}
+
+// The report as a dialog over the new playlist, or over the Playlists page when
+// nothing was made. The focus starts on Close; Escape and a click beside it close
+// it too. Arrows, Page Up, Page Down, Home and End scroll the list.
+export component PlaylistImportReport inherits Modal {
+    function close() {
+        PlaylistImport.open = false;
+    }
+    function scroll-to(y: length) {
+        scroll.content-y = max(min(0px, scroll.visible-height - scroll.content-height), min(0px, y));
+    }
+
+    label: PlaylistImport.failed || PlaylistImport.name == "" ? @tr("No playlist was imported") : @tr("Imported as “{}”", PlaylistImport.name);
+    card-width: Theme.dialog-width;
+    escape => {
+        root.close();
+    }
+    scrim-clicked => {
+        root.close();
+    }
+    focus-first => {
+        close-button.focus();
+    }
+    focus-last => {
+        close-button.focus();
+    }
+
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        min-height: inner.min-height;
+        preferred-height: inner.preferred-height;
+        vertical-stretch: 1;
+        key-pressed(event) => {
+            if event.text == Key.DownArrow {
+                root.scroll-to(scroll.content-y - Theme.target-height);
+                return accept;
+            }
+            if event.text == Key.UpArrow {
+                root.scroll-to(scroll.content-y + Theme.target-height);
+                return accept;
+            }
+            if event.text == Key.PageDown {
+                root.scroll-to(scroll.content-y - scroll.visible-height);
+                return accept;
+            }
+            if event.text == Key.PageUp {
+                root.scroll-to(scroll.content-y + scroll.visible-height);
+                return accept;
+            }
+            if event.text == Key.Home {
+                root.scroll-to(0px);
+                return accept;
+            }
+            if event.text == Key.End {
+                root.scroll-to(-scroll.content-height);
+                return accept;
+            }
+            reject
+        }
+
+        inner := VerticalLayout {
+            scroll := ScrollArea {
+                vertical-stretch: 1;
+                preferred-height: body.preferred-height;
+
+                body := VerticalLayout {
+                    padding: Theme.space-xl;
+                    padding-bottom: Theme.space-s;
+                    spacing: Theme.space-s;
+                    alignment: start;
+
+                    Text {
+                        text: root.label;
+                        color: Theme.colors.text;
+                        font-size: Theme.font-large;
+                        font-weight: Theme.weight-strong;
+                        wrap: word-wrap;
+                        min-height: self.preferred-height;
+                    }
+                    Text {
+                        text: PlaylistImport.failed ? @tr("“{}” could not be read.", PlaylistImport.file)
+                            : PlaylistImport.entries == 0 ? @tr("“{}” has no entries.", PlaylistImport.file)
+                            : PlaylistImport.name == "" ? @tr("None of the entries in “{}” is a track of the library:", PlaylistImport.file)
+                            : @tr("{n} entry isn't a track of the library, so it was left out:" | "{n} entries aren't tracks of the library, so they were left out:" % PlaylistImport.unmatched.length);
+                        color: Theme.colors.text;
+                        font-size: Theme.font-body;
+                        wrap: word-wrap;
+                        min-height: self.preferred-height;
+                    }
+
+                    for entry[index] in PlaylistImport.unmatched: VerticalLayout {
+                        if index > 0: Rectangle {
+                            height: 1px;
+                            background: Theme.colors.surface;
+                        }
+
+                        VerticalLayout {
+                            spacing: Theme.space-xs;
+                            padding-top: Theme.space-s;
+                            padding-bottom: Theme.space-s;
+
+                            if entry.title != "": Text {
+                                text: entry.title;
+                                color: Theme.colors.text;
+                                font-size: Theme.font-body;
+                                wrap: word-wrap;
+                                min-height: self.preferred-height;
+                            }
+                            Text {
+                                text: entry.location;
+                                color: entry.title != "" ? Theme.colors.text-muted : Theme.colors.text;
+                                font-size: entry.title != "" ? Theme.font-small : Theme.font-body;
+                                wrap: word-wrap;
+                                min-height: self.preferred-height;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Marks where the list scrolls under the foot, when it doesn't fit.
+            Rectangle {
+                height: 1px;
+
+                Rectangle {
+                    visible: scroll.content-height > scroll.visible-height;
+                    background: Theme.colors.surface;
+                }
+            }
+
+            HorizontalLayout {
+                padding: Theme.space-xl;
+                padding-top: Theme.space-l;
+                alignment: start;
+
+                close-button := Button {
+                    text: @tr("Close");
+                    label: @tr("Close the import report");
+                    init => {
+                        self.focus();
+                    }
+                    clicked => {
+                        root.close();
+                    }
+                }
+            }
+        }
+    }
+}

@@ -10,6 +10,7 @@ import { AlbumDetail, TrackRow, TrackSelection } from "album-page.slint";
 import { SelectionChange } from "selection.slint";
 import { PlaylistDetail } from "playlist-page.slint";
 import { Playlists } from "playlist-state.slint";
+import { PlaylistImport, PlaylistImportReport, UnmatchedEntry } from "playlist-import.slint";
 import { LibraryError, LibraryState, ScanPhase, SourceFolder, UnreadableFile } from "library-state.slint";
 import { ProgressBar } from "components.slint";
 import { PlayerProblem, PlayerState, PlayState, QueueRow, QueueSource, Repeat, ScrobbleMark, Shuffle, ShuffleKind, SleepTimer } from "player-state.slint";
@@ -41,7 +42,7 @@ export { LastfmProblem, LastfmState, LastfmStatus }
 export { Glyph, IconArt, PlayerProblem, PlayerState, PlayState, QueueRow, QueueSource, Repeat, ScrobbleMark, Shuffle, ShuffleKind, SleepTimer }
 export { CoverSearch, CoverSearchStatus, PhotoSearch, PhotoSearchStatus }
 export { TagChange, TagEditorState, TagEditorStatus, TagFailure, TagFailureReason, TagField, TagMixed, TagProblem, TagValues }
-export { FolderRow, PlaylistDetail, Playlists, SongColumn, SongRow, SongSelection }
+export { FolderRow, PlaylistDetail, PlaylistImport, Playlists, SongColumn, SongRow, SongSelection, UnmatchedEntry }
 export { SelectionChange }
 export { MovingPictures, PictureFrame, PictureSlot }
 export { ColumnWidths }
@@ -104,6 +105,8 @@ export component AppWindow inherits Window {
     callback playlist-range-changed(int, int);
     // Makes a playlist with this name and opens it.
     callback create-playlist(string);
+    // Asks for an M3U file, makes a playlist of it and opens it.
+    callback import-playlist();
     // Edits the open playlist.
     callback rename-playlist(string);
     callback delete-playlist();
@@ -351,7 +354,7 @@ export component AppWindow inherits Window {
     changed system-scheme-known => {
         Theme.system-scheme-changed();
     }
-    private property <bool> sidebar-covered: root.now-playing-shown > 0 || PlayerState.now-playing-open || CoverSearch.open || PhotoSearch.open || TagEditorState.open || AgentState.history-open || AgentState.review-open || Labels.editor-open || Setup.open || Confirmation.open;
+    private property <bool> sidebar-covered: root.now-playing-shown > 0 || PlayerState.now-playing-open || CoverSearch.open || PhotoSearch.open || TagEditorState.open || AgentState.history-open || AgentState.review-open || Labels.editor-open || Setup.open || PlaylistImport.open || Confirmation.open;
     out property <length> frame-sidebar-width: sidebar.width;
     out property <length> frame-sidebar-drag-height: root.sidebar-covered ? 0px : max(0px, sidebar-scroll.y + sidebar-scroll.content-y + sidebar-content.y + nav-list.y - Theme.space-s);
     changed frame-sidebar-drag-height => {
@@ -780,6 +783,10 @@ export component AppWindow inherits Window {
                                 root.opened-from-search = false;
                                 root.create-playlist(name);
                             }
+                            import-playlist => {
+                                root.opened-from-search = false;
+                                root.import-playlist();
+                            }
                             play(start, shuffle) => {
                                 root.play-playlist(start, shuffle);
                             }
@@ -959,6 +966,12 @@ export component AppWindow inherits Window {
 
                 // The setup wizard, at the first start or from Settings.
                 if Setup.open: SetupWizard {
+                    width: parent.width;
+                    height: parent.height;
+                }
+
+                // What an import of a playlist file left out.
+                if PlaylistImport.open: PlaylistImportReport {
                     width: parent.width;
                     height: parent.height;
                 }
