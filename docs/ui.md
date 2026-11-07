@@ -871,12 +871,13 @@ The Albums page tells apart why it is empty:
     A timer that runs out while nothing plays just ends, and Stop, or playback
     stopping by itself, ends a running one. It counts in whole minutes on a Slint
     timer and isn't saved.
-- **Width at 720 px** (at 100 % zoom): the bar's three parts have fixed minimums: 136 px for the
+- **Width at 720 px** (at 100 % zoom): the bar's three parts have fixed minimums: 120 px for the
   track, 240 px for the controls and 272 px for the buttons and volume (five 40 px
-  buttons, 4 px apart, and a volume slider of at least 52 px). Below 800 px the gaps
-  between the parts narrow from 24 to 16 px and those between the buttons from 8 to
-  4 px; with the padding that is exactly 720 px. Another button on the right needs
-  room taken elsewhere (`smallest_window_keeps_everything_inside` checks it).
+  buttons, 4 px apart, and a volume slider of at least 52 px). With its padding and
+  gaps that is exactly 720 px; another button on the right needs room taken
+  elsewhere (`smallest_window_keeps_everything_inside` checks it). The gaps can't
+  depend on the window's width: the bar's minimum feeds the window's, so Slint sees
+  a binding loop.
 - **Seeking** moves the bar to the new position at once. Positions the engine sent
   before it took the seek are ignored for up to a second, so the bar doesn't jump
   back.

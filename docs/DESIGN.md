@@ -183,6 +183,6 @@ the owner's until reviewed; keep, change or drop each.
   accent, the others muted, and it stays in the middle of the list, gliding there
   as the mouse wheel glides. The view's toggle sits left of the track's menu in the
   top right corner. The bar's lyrics button comes first of its three switches.
-  Below 800 px the bar's gaps narrow (24 to 16 px between its parts, 8 to 4 px
-  between its buttons) and the volume slider may shrink to 52 px, so the new button
-  fits at 720 px.
+  So the new button fits at 720 px, the bar's buttons on the right sit 4 px apart
+  instead of 8 px at every width, and at the narrowest the volume slider may shrink
+  to 52 px and the playing track's title to 120 px with its cover.

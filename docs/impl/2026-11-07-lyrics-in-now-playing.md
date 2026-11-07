@@ -35,8 +35,9 @@ player bar, Settings, setup wizard)
 ## How to test
 
 **Automated coverage.** `cargo test --workspace` runs everything. For this change
-alone: `cargo test -p vcmp-library lyrics`, `cargo test -p vcmp-integrations lrclib`
-and `cargo test -p vcmp-app --test lyrics`, plus `--test ui_invariants` and
+alone: `cargo test -p vcmp-library --lib lyrics`, `cargo test -p vcmp-library --test
+lyrics`, `cargo test -p vcmp-integrations lrclib` and `cargo test -p vcmp-app --test
+lyrics`, plus `--test ui_invariants` and
 `--test ui_behaviour` (the 720 px check covers the wider player bar). The
 repository has no end-to-end suite beyond these headless Slint tests.
 `VCMP_SHOT_ONLY=lyrics cargo run -p vcmp-app --example screenshots` takes
@@ -86,7 +87,7 @@ the wizard. Next to one FLAC (say `01 Song.flac`) save `01 Song.lrc` with:
 - Offline with the switch on: nothing shows, no error, and the next play after 10
   minutes asks again.
 - The window at 720 px wide: the player bar's buttons, volume slider and title all
-  fit.
+  fit; the right-hand buttons are 4 px apart at every width.
 - The setup wizard's Online services step lists "Find lyrics online".
 
 ## What is missing
@@ -99,9 +100,11 @@ both themes is left to the owner, as asked.
 - Not run: the new tests may need fixes once run, mainly `crates/vcmp-app/tests/lyrics.rs`,
   which relies on the bar and view buttons existing in the headless window, and the
   SYLT fixture test, which relies on lofty writing a binary SYLT frame.
-- The player bar didn't fit at 720 px with a fifth button. Below 800 px its gaps now
-  narrow (24 to 16 px, 8 to 4 px) and the volume slider can shrink to 52 px; the
-  owner should look at it (DESIGN.md, "Awaiting the owner's review").
+- The player bar didn't fit at 720 px with a fifth button. Its right-hand buttons
+  are now 4 px apart instead of 8 px at every width, and at 720 px the volume
+  slider shrinks to 52 px and the track's part to 120 px. Narrowing only below a
+  width was tried and dropped: Slint reports it as a binding loop. The owner should
+  look at it (DESIGN.md, "Awaiting the owner's review").
 - An `.lrc` file without any time stamps is read as plain text and ranks first
   among plain sources; the spec's order doesn't mention that case.
 - Manually scrolling synced lyrics is undone at the next line change, which brings
@@ -116,7 +119,7 @@ both themes is left to the owner, as asked.
 ## Recommended follow-ups
 
 - Run the tests and the screenshots, and have the owner review the lyrics layout and
-  the narrower player bar at 720 to 800 px.
+  the tighter player bar.
 - Pause the follow-the-line scrolling for a few seconds after a manual scroll, as
   other players do.
 - Detect `.lrc` encodings beyond UTF-8, UTF-16 and Latin-1 if users with

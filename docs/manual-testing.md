@@ -157,7 +157,7 @@ but the `.lrc` files below are yours to add and remove.
       again and the lyrics appear. **(never seen working with real tracks)**
 - [ ] A track with plain lyrics in its tags and "Find lyrics online" on: the plain
       text shows at once and gives way to LRCLIB's synced lyrics when they come.
-- [ ] Player bar at 720 px wide (and at 800 px): all buttons, the volume slider and
+- [ ] Player bar at 720 px wide: all buttons, the volume slider and
       the track's title fit without overlapping.
 
 ### Selecting and playing tracks
