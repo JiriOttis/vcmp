@@ -1,6 +1,6 @@
 //! Music library: source directories, scanning, tag reading, the SQLite database and
-//! artwork caching, and playlists written out as M3U files. Must not depend on the UI
-//! crate.
+//! artwork caching, and playlists written to and read from M3U files. Must not depend
+//! on the UI crate.
 //!
 //! The database is a cache of the files' tags (the files are the source of truth) plus
 //! what only VCMP knows: source directories, settings, labels, favourites, the plays
@@ -43,7 +43,7 @@ pub use error::{Error, Result};
 pub use favourites::{Favourite, FavouritesSummary};
 pub use labels::{LABEL_NAME_MAX, LABEL_PALETTE, Label, LabelId, valid_label_colour};
 pub use lookups::{CoverArtId, CoverLookup};
-pub use m3u::{M3uExport, m3u_file_name};
+pub use m3u::{M3uEntry, M3uExport, M3uImport, m3u_file_name};
 pub use playlists::{Playlist, PlaylistEntry, PlaylistId};
 pub use query::{Album, AlbumId, Artist, ArtistId, SearchResults, Track, TrackId};
 pub use scan::{ScanPhase, ScanProgress, ScanReport, SkippedFile};

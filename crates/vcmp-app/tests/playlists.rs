@@ -1,6 +1,6 @@
 //! Playlists in the window: making one from a track menu or the Playlists page,
-//! naming it, its page with missing files, playing it, editing its order, the
-//! sidebar list and search.
+//! naming it, its page with missing files, playing it, editing its order, exporting
+//! and importing it, the sidebar list and search.
 
 mod common;
 
@@ -16,7 +16,7 @@ use slint::platform::{Key, WindowEvent};
 use slint::{ComponentHandle, LogicalSize, Model, SharedString};
 use vcmp_app::library_view::{LibraryView, SEARCH_DELAY};
 use vcmp_app::player_service::{PlayerControl, PlayerService};
-use vcmp_app::{AppWindow, Page, PlayerState, Playlists};
+use vcmp_app::{AppWindow, Page, PlayerState, PlaylistImport, Playlists};
 use vcmp_library::{Library, PlaylistId};
 use vcmp_playback::{Command, Event, NowPlaying, QueueEntry, QueueView, TrackRef};
 
@@ -161,6 +161,19 @@ impl App {
     fn open_page(&self, label: &str) {
         find(&self.window, AccessibleRole::Tab, label).invoke_accessible_default_action();
         mock_elapsed_time(Duration::ZERO);
+    }
+
+    /// Lets a dialog appear or go, and its focus settle.
+    fn frame(&self) {
+        slint::platform::update_timers_and_animations();
+        let _ = ElementHandle::find_by_accessible_label(&self.window, "Close").count();
+        slint::platform::update_timers_and_animations();
+    }
+
+    fn says(&self, text: &str) {
+        ElementHandle::find_by_accessible_label(&self.window, text)
+            .next()
+            .unwrap_or_else(|| panic!("nothing says {text:?}"));
     }
 }
 
@@ -347,6 +360,106 @@ fn an_export_says_where_it_went_and_what_was_missing() {
     app.window.invoke_playlist_activated(2);
     assert_eq!(app.window.get_playlist_detail().name, "Other");
     assert_eq!(app.window.get_playlist_detail().exported_to, "");
+}
+
+#[test]
+fn an_import_opens_the_playlist_and_reports_only_what_was_left_out() {
+    let app = start();
+    app.open_page("Playlists");
+    find(&app.window, AccessibleRole::Button, "Import playlist…");
+    let report = app.window.global::<PlaylistImport>();
+    let lists = app.dir.path().join("Lists");
+    std::fs::create_dir_all(&lists).unwrap();
+
+    // Everything matched: the playlist opens, and no report shows.
+    let file = lists.join("Road trip.m3u8");
+    std::fs::write(
+        &file,
+        "#EXTM3U\n../music/1.flac\n../music/3.flac\n../music/1.flac\n",
+    )
+    .unwrap();
+    app.view.playlists().import(&file);
+    app.frame();
+    assert!(!report.get_open());
+    assert!(app.window.get_playlist_open());
+    assert_eq!(app.window.get_playlist_detail().name, "Road trip");
+    let titles: Vec<String> = app.rows().into_iter().map(|(title, _)| title).collect();
+    assert_eq!(titles, ["One", "Three", "One"]);
+
+    // Two entries left out: the playlist opens under the report, which lists them.
+    app.window.set_playlist_open(false);
+    let file = lists.join("Mix.m3u");
+    std::fs::write(
+        &file,
+        "#EXTINF:1,Band - Two\nelsewhere/two.mp3\n\
+         #EXTINF:5,Band - Gone\ngone.flac\n\
+         http://example.com/x.mp3\n",
+    )
+    .unwrap();
+    app.view.playlists().import(&file);
+    app.frame();
+    assert!(report.get_open());
+    assert!(app.window.get_playlist_open());
+    assert_eq!(app.window.get_playlist_detail().name, "Mix");
+    let titles: Vec<String> = app.rows().into_iter().map(|(title, _)| title).collect();
+    assert_eq!(titles, ["Two"]);
+    assert_eq!(
+        (report.get_name().as_str(), report.get_entries()),
+        ("Mix", 3)
+    );
+    let unmatched: Vec<(String, String)> = report
+        .get_unmatched()
+        .iter()
+        .map(|entry| (entry.title.to_string(), entry.location.to_string()))
+        .collect();
+    assert_eq!(
+        unmatched,
+        [
+            ("Band - Gone".to_owned(), "gone.flac".to_owned()),
+            (String::new(), "http://example.com/x.mp3".to_owned()),
+        ]
+    );
+    for said in [
+        "Imported as “Mix”",
+        "2 entries aren't tracks of the library, so they were left out:",
+        "Band - Gone",
+        "gone.flac",
+        "http://example.com/x.mp3",
+    ] {
+        app.says(said);
+    }
+    // The focus starts in the report, so Escape closes it.
+    key(&app.window, Key::Escape);
+    app.frame();
+    assert!(!report.get_open());
+    assert!(app.window.get_playlist_open());
+
+    // Nothing matched: no playlist, and the report says so over the grid.
+    app.window.set_playlist_open(false);
+    let names = app.names();
+    let file = lists.join("Nothing.m3u");
+    std::fs::write(&file, "#EXTINF:1,Nobody - Nothing\nnothing.mp3\n").unwrap();
+    app.view.playlists().import(&file);
+    app.frame();
+    assert!(report.get_open());
+    assert!(!app.window.get_playlist_open());
+    assert_eq!(app.names(), names);
+    app.says("No playlist was imported");
+    app.says("None of the entries in “Nothing.m3u” is a track of the library:");
+    find(
+        &app.window,
+        AccessibleRole::Button,
+        "Close the import report",
+    )
+    .invoke_accessible_default_action();
+    app.frame();
+    assert!(!report.get_open());
+
+    // A file that can't be read says so.
+    app.view.playlists().import(&lists.join("gone.m3u"));
+    app.frame();
+    assert!(report.get_open() && report.get_failed());
+    app.says("“gone.m3u” could not be read.");
 }
 
 #[test]

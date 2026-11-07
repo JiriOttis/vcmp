@@ -491,7 +491,39 @@ tracks are searched separately.
   - `m3u_file_name` suggests the file name: the playlist's name with `<>:"/\|?*`
     and control characters replaced by `_`, trailing dots and spaces dropped, and
     `.m3u8`.
-  - Import is not built yet.
+- **M3U import** (`src/m3u.rs`, `Library::import_playlist`) makes a new, ordinary
+  playlist from a `.m3u` or `.m3u8` file, with no link back to it
+  (`docs/specs/2026-11-07-m3u-playlist-import.md`):
+  - **Reading:** the whole file is UTF-8 (a byte order mark is dropped) whatever its
+    extension; when it isn't valid UTF-8, the whole file is read as Windows-1252.
+    Lines end in `\n`, `\r\n` or `\r`. Every line that isn't blank and doesn't start
+    with `#` is an entry; the `#EXTINF:<seconds>,<text>` line before it gives its
+    length (a negative one is unknown; attributes after the length are skipped)
+    and its title. Other `#` lines are skipped.
+  - **By path first:** a `file:` URL is decoded; other URLs (`http://`,
+    `content://`) have no path. A path takes `/` and `\` alike, is resolved against
+    the playlist file's folder when relative, and has `.` and `..` resolved
+    without the filesystem. It matches the track stored at that path, available or
+    not, like `track_id_for_path`; failing that, a file that exists is looked up
+    again by its real path (letter case on Windows, links).
+  - **Then by tags:** an entry whose path gives no library track (gone, outside the
+    music folders, a URL) and that has an `#EXTINF` text is matched by it. The text
+    is split at the first " - " into artist and title, compared with every track's
+    artist and title after folding (lowercase, diacritics removed through Unicode
+    decomposition, one space between words); when that finds nothing, the whole
+    text is compared with titles alone, whatever the artist. Of several tracks,
+    the one whose length is closest to the entry's wins, however far; then an
+    available one; then the first in the library. The library's tags are read
+    once, on the first entry that needs them.
+  - **The playlist** holds the matched tracks in file order, repeats included, and
+    is named after the file without its extension (the caller's fallback name when
+    that is blank). A name another playlist has (ignoring case, as the database
+    does) gets " 2", " 3" and so on. The playlist and its entries are written in
+    one transaction. When nothing matched, or the file had no entries, nothing is
+    made.
+  - **`M3uImport`** says what was made (`playlist`, `name`), how many entries the
+    file had, and lists the unmatched ones (`M3uEntry`: location, `#EXTINF` text
+    and length) in file order.
 
 ## Labels
 
@@ -653,6 +685,16 @@ cargo run --release -p vcmp-library --example scan_profile -- /path/to/music
   is a folder on the system disk gives a relative path through that folder, which
   still works on this machine. Btrfs subvolumes count as separate filesystems, so
   a playlist saved in another subvolume than the music gets absolute paths.
+- M3U import reads a file that isn't UTF-8 as Windows-1252. A legacy file in
+  another code page (CP1250 for Czech, CP1251 for Cyrillic) gets wrong letters in
+  its paths and titles, so those entries match neither way. Saving the file as
+  `.m3u8` in the player that made it fixes that.
+- Tag matching lets the length only break ties, so a live or remastered version
+  with the same artist and title can stand in for the one the file meant, and the
+  import counts it as matched. An entry with a title alone matches that title by
+  any artist.
+- A path in other letter case than the file's matches on Windows, where the real
+  path gives the file's own case; on macOS it falls back to the tags.
 - Labels are in the database only. Deleting `library.sqlite3` (or losing it) loses
   every label, and nothing in the files can bring them back.
 - The owner's own label edits keep no history and can't be undone; only agents'
