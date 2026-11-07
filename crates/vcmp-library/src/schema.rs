@@ -359,6 +359,26 @@ CREATE TABLE favourites (
 
 CREATE INDEX favourites_liked ON favourites(liked_ms);
 "#,
+    r#"
+-- What LRCLIB answered for a track, and to which question: its title, artist, album
+-- (NULL when it has none) and duration in whole seconds when it was asked. A
+-- different question (the tags changed) asks again. synced is LRC text, plain the
+-- text without times; both NULL when nothing was found. Keyed by where the track
+-- comes from ('local' and the library track id) rather than a reference, so tracks
+-- of other sources can use it too.
+CREATE TABLE lyrics_lookups (
+    source TEXT NOT NULL,
+    track TEXT NOT NULL,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    album TEXT,
+    duration_s INTEGER NOT NULL,
+    synced TEXT,
+    plain TEXT,
+    looked_up_ms INTEGER NOT NULL,
+    PRIMARY KEY (source, track)
+) STRICT;
+"#,
 ];
 
 pub(crate) const VERSION: i64 = MIGRATIONS.len() as i64;
