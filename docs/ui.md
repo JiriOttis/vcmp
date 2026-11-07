@@ -38,7 +38,7 @@ DESIGN.md).
 | `ui/selection.slint` | `SelectionChange`: how a track list's selection changes |
 | `ui/columns.slint` | `ColumnWidths` global (the saved column shares) and `ColumnEdge`, the resizable edge between two column headings |
 | `src/selection.rs` | Applies selection changes to a list's rows, and picks the rows a menu acts on |
-| `ui/cover-picker.slint` | `CoverSearch` global and `CoverPicker`: "Find cover online" and the covers to pick from |
+| `ui/cover-picker.slint` | `CoverSearch` global and `CoverPicker`: "Find cover online" and the covers to pick from, for the album page's album or any album by id (`find-album`) |
 | `src/cover_fetch.rs` | `CoverFetch`: runs the cover search, stores the picked cover and shows it everywhere |
 | `ui/photo-picker.slint` | `PhotoSearch` global and `PhotoPicker`: an artist's photo, found online or from a file |
 | `src/artist_photos.rs` | `ArtistPhotos`: runs the photo search, keeps the chosen photo and shows it on the page and the cards |
@@ -70,6 +70,8 @@ DESIGN.md).
 | `src/labels.rs` | `LabelBrowser`: labels behind the `Labels` global: the menus' choices and toggles, the dialog, the filters, the label page, the chips rows show, the colour picker's images |
 | `ui/favourites.slint` | `Favourites` global (the fixed name, the menus' entry and the hearts' callbacks) and `FavouritesPicture`, the heart the Favourites playlist shows for a picture |
 | `src/favourites.rs` | `Hearts`: the liked set rows read, the one path that likes and unlikes, and the update of every heart on screen |
+| `ui/library-check.slint` | `LibraryCheck` global and `LibraryCheckPage`: duplicates, missing tags and missing covers, opened from Settings (see "Library check") |
+| `src/library_check.rs` | `CheckPage`: fills the page from the library's checks, hands its actions to the player, the tag editor, the cover picker and the file manager, and stores "Not duplicates" |
 | `src/theme/mod.rs` | The built-in themes, the accents and the labels' colours, plus their contrast tests; `apply` hands a palette to the `Theme` global |
 | `src/theme/contrast.rs` | The WCAG AA check: the pairs a palette must keep apart, used by the tests and the Settings warning |
 | `src/theme/file.rs` | Theme files: reading, writing and listing the themes folder |
@@ -668,7 +670,8 @@ buttons (caught in the winit hook, `src/shortcuts.rs`) and Alt+Left and Alt+Righ
 (the window's shortcut scope, not while typing) move through it.
 
 - **A place** is a section on its grid, or the album, artist (or an artist's
-  album) or playlist page open in it.
+  album) or playlist page open in it, or the Library check open in place of
+  Settings.
 - **Remembering:** the window calls `navigated` whenever the section or the page
   open in it changes, however that came about: the sidebar, a card, a back button,
   Escape, a link in the player bar. Moving somewhere new drops what was ahead, as a
@@ -1226,6 +1229,39 @@ owned by `LibraryView`) answers the `Favourites` global.
   (`favourites`, "Next from Favourites" in the queue panel). Empty, it says how to
   like a track.
 
+## Library check
+
+The finder for duplicates, missing tags and missing covers
+([library check spec](specs/2026-11-07-library-check.md), the rules in
+[library.md](library.md#library-check)). Settings shows a "Library check" row under
+Music folders once there are folders; its "Check library…" button opens the page in
+place of Settings (`LibraryCheck.open`), a place of its own in the history, so Back
+returns to Settings. The page's back button and Escape do the same, and the
+sidebar's Settings entry shows Settings.
+
+- **Read when it opens.** `CheckPage` (owned by `LibraryView`) runs the three checks
+  when the page opens and again on every library reload while it is open, so a tag
+  edit, a found cover or a scan updates it. Nothing is cached between visits.
+- **Tabs** (a `SegmentedChoice`): Duplicates, Missing tags and Missing covers, each
+  with its count, and a line saying its rule. Each lists 100 groups or albums, and
+  "Show more" adds 100 more, so a library missing thousands of years doesn't build
+  thousands of rows at once.
+- **Duplicates:** each group is headed by its title, artist and number of copies,
+  with "Not duplicates". Each copy shows its album, format and length, and its path
+  with the middle left out when long (the full path is its spoken description).
+  Once a group is marked, a switch shows the hidden groups, each with "Show again".
+- **Missing tags:** one block per album, headed by the album (Unknown for an
+  Unknown album) and its artist, with "Edit tags…" for every track the block lists.
+  Each track shows what it lacks as words ("No year"), not by colour.
+- **Missing covers:** one row per album with "Find cover online", which opens the
+  cover picker over the page (`CoverSearch.find-album`).
+- **Actions on a track:** Play (a duplicate plays its group from that copy, with no
+  context; a track missing tags plays its album from that track, "Next from" the
+  album), "Edit tags…" (the tag editor for that track) and Show in the file manager
+  (`vcmp_integrations::file_manager::reveal`: Explorer `/select` on Windows,
+  `open -R` on macOS, the `FileManager1` D-Bus call on Linux, the folder where no
+  file manager answers). The page never writes, moves or removes a file itself.
+
 ## Menus over lists
 
 The track lists (`TrackList`, `SongTable`), the queue panel and the card grids
@@ -1371,3 +1407,8 @@ window's top left on Linux, so there is no shift to speak of.
   reduce_motion` prints what VCMP reads and, except on macOS, each change.
 - `examples/screenshots.rs` cannot force a window size under tiling window managers.
   Layout at the smallest window size is covered by a test instead.
+- The Library check runs its queries on the UI thread when the page opens and after
+  each library change while it is open; a very large library may pause the window
+  for a moment then.
+- The Library check lists 100 entries per tab and adds 100 more with "Show more"
+  rather than creating only the rows in view, as the songs table does.

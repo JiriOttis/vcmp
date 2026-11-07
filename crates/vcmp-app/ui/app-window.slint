@@ -32,6 +32,7 @@ import { CaptionButtons, WindowFrame } from "window-frame.slint";
 import { ConfirmDialog, Confirmation } from "confirmation.slint";
 import { Setup, SetupWizard } from "setup.slint";
 import { Favourites } from "favourites.slint";
+import { CheckList, CheckTab, CheckTrack, CoverlessAlbum, DuplicateBlock, GapBlock, LibraryCheck, LibraryCheckPage } from "library-check.slint";
 import { AccentTile, ContrastFailure, InvalidThemeFile, ThemeFileProblem, Themes, ThemeTile } from "themes.slint";
 
 export { Confirmation, Favourites, Setup, WindowFrame }
@@ -41,6 +42,7 @@ export { AgentState, ChangeEntry, ChangeField, ChangeGroup, ChangeKind, ChangePr
 export { LastfmProblem, LastfmState, LastfmStatus }
 export { Glyph, IconArt, PlayerProblem, PlayerState, PlayState, QueueRow, QueueSource, Repeat, ScrobbleMark, Shuffle, ShuffleKind, SleepTimer }
 export { CoverSearch, CoverSearchStatus, PhotoSearch, PhotoSearchStatus }
+export { CheckList, CheckTab, CheckTrack, CoverlessAlbum, DuplicateBlock, GapBlock, LibraryCheck }
 export { TagChange, TagEditorState, TagEditorStatus, TagFailure, TagFailureReason, TagField, TagMixed, TagProblem, TagValues }
 export { FolderRow, PlaylistDetail, PlaylistImport, Playlists, SongColumn, SongRow, SongSelection, UnmatchedEntry }
 export { SelectionChange }
@@ -226,6 +228,11 @@ export component AppWindow inherits Window {
     changed open-label-index => {
         root.navigated();
     }
+    // The Library check, opened from Settings in its place.
+    private property <bool> check-open: LibraryCheck.open;
+    changed check-open => {
+        root.navigated();
+    }
 
     // Shows a section on its grid, not on the album, artist or playlist it last
     // showed, as its sidebar entry does.
@@ -243,6 +250,9 @@ export component AppWindow inherits Window {
         }
         if page == Page.labels && root.label-open {
             labels-page.close-label();
+        }
+        if page == Page.settings && LibraryCheck.open {
+            LibraryCheck.open = false;
         }
     }
 
@@ -882,12 +892,17 @@ export component AppWindow inherits Window {
                                 root.queue-folder-file(index, next);
                             }
                         }
-                        if root.current-page == Page.settings: ScrollArea {
+                        if root.current-page == Page.settings && !LibraryCheck.open: ScrollArea {
                             x: 0;
                             width: root.page-width;
                             SettingsPage {
                                 width: parent.width;
                             }
+                        }
+                        if root.current-page == Page.settings && LibraryCheck.open: LibraryCheckPage {
+                            x: 0;
+                            width: root.page-width;
+                            height: parent.height;
                         }
                         if root.current-page == Page.about: ScrollArea {
                             x: 0;

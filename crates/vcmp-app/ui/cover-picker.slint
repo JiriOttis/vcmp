@@ -20,9 +20,10 @@ export enum CoverSearchStatus {
     download-failed,
 }
 
-// "Find cover online" for the album the album page shows: the search, the covers it
-// found and what the user does with them. src/cover_fetch.rs fills it in and
-// implements the callbacks; nothing is fetched until `find` is called.
+// "Find cover online" for the album the album page shows, or one the Library check
+// lists: the search, the covers it found and what the user does with them.
+// src/cover_fetch.rs fills it in and implements the callbacks; nothing is fetched
+// until `find` or `find-album` is called.
 export global CoverSearch {
     // The picker is shown.
     in-out property <bool> open;
@@ -34,6 +35,8 @@ export global CoverSearch {
     in property <[AlbumTile]> covers;
     // Searches covers for the album on the album page, and opens the picker.
     callback find();
+    // The same for the album with this id, wherever it is shown.
+    callback find-album(int);
     // Downloads cover `n` and makes it the album's cover.
     callback choose(int);
     // Closes the picker, stopping the search.

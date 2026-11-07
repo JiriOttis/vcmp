@@ -1,5 +1,6 @@
 //! "Find cover online" behind the `CoverSearch` global. The album page of an album
-//! without artwork asks for covers; MusicBrainz and the Cover Art Archive supply
+//! without artwork asks for covers, and so does the Library check for the albums it
+//! lists; MusicBrainz and the Cover Art Archive supply
 //! candidates (`CoverPicker` in `vcmp-integrations`), which the picker shows as they
 //! arrive. The one the user picks is downloaded, stored as the album's artwork
 //! (`Library::set_fetched_cover`) and shown at once: on the album page and in the
@@ -12,7 +13,7 @@ use std::time::SystemTime;
 
 use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use vcmp_integrations::musicbrainz::{AlbumQuery, Candidate, Cover, CoverPicker, PickerEvent};
-use vcmp_library::{AlbumId, CoverArtId, Library};
+use vcmp_library::{Album, AlbumId, CoverArtId, Library};
 
 use crate::albums::{TILE_PIXELS, initial};
 use crate::library_view::LibraryView;
@@ -99,6 +100,14 @@ impl CoverFetch {
                 }
             }
         });
+        state.on_find_album({
+            let weak = weak.clone();
+            move |id| {
+                if let Some(fetch) = weak.upgrade() {
+                    fetch.find_album(AlbumId(i64::from(id)));
+                }
+            }
+        });
         state.on_choose({
             let weak = weak.clone();
             move |index| {
@@ -142,7 +151,22 @@ impl CoverFetch {
 
     /// Opens the picker for the album the album page shows and starts searching.
     pub fn find(&self) {
-        let (Some(window), Some(album)) = (self.window.upgrade(), self.view.shown_album()) else {
+        if let Some(album) = self.view.shown_album() {
+            self.search_for(album);
+        }
+    }
+
+    /// Opens the picker for the album with this id, from wherever it is listed.
+    pub fn find_album(&self, id: AlbumId) {
+        match self.library.album(id) {
+            Ok(Some(album)) => self.search_for(album),
+            Ok(None) => log::info!("album {} has no tracks now; no cover to find", id.0),
+            Err(error) => log::error!("could not read album {}: {error}", id.0),
+        }
+    }
+
+    fn search_for(&self, album: Album) {
+        let Some(window) = self.window.upgrade() else {
             return;
         };
         // An Unknown album is no release to find a cover for.

@@ -360,3 +360,44 @@ fn every_track_and_album_menu_offers_favourites() {
     // the two album grids: a sign the search above still finds them.
     assert!(menus >= 7, "found only {menus} track and album menus");
 }
+
+/// The Library check only finds; it never writes, moves or removes a music file
+/// itself. Its glue reaches files only through the file manager, the tag editor and
+/// the cover picker (each of which the user drives), so it must not touch the file
+/// system or the library's writing calls.
+#[test]
+fn the_library_check_changes_no_file() {
+    let sources = [
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/library_check.rs"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../vcmp-library/src/check.rs"),
+    ];
+    let forbidden = [
+        "std::fs",
+        "fs::",
+        "File::",
+        "remove_file",
+        "remove_dir",
+        "rename(",
+        "write_tags",
+        "accept_change_set",
+        "set_fetched_cover",
+        "OpenOptions",
+    ];
+    let mut found = Vec::new();
+    for path in &sources {
+        let text = fs::read_to_string(path).expect("source file");
+        for (number, line) in text.lines().enumerate() {
+            let code = strip_comment(line);
+            for word in forbidden {
+                if code.contains(word) {
+                    found.push(format!("{}:{}: {word}", path.display(), number + 1));
+                }
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "the Library check reaches for the file system:\n{}",
+        found.join("\n")
+    );
+}

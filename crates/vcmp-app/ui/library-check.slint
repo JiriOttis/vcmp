@@ -1,0 +1,530 @@
+import { Theme } from "theme.slint";
+import { Button, IconButton, ScrollArea, SectionHeading, SegmentedChoice, Toggle } from "components.slint";
+import { Glyph } from "icons.slint";
+import { BackButton } from "album-page.slint";
+
+// The Library check's tabs.
+export enum CheckTab { duplicates, missing-tags, missing-covers }
+
+// The lists whose rows are tracks.
+export enum CheckList { duplicates, missing-tags }
+
+// One track in the Library check.
+export struct CheckTrack {
+    // The title as shown everywhere: the file name when the file holds none.
+    title: string,
+    // Track number as tagged; empty when untagged.
+    number: string,
+    // What tells it apart: album, format and length for a duplicate, artist and
+    // length for a track missing tags.
+    details: string,
+    path: string,
+    // The path with its middle left out when it is long.
+    short-path: string,
+    // The fields its tags lack (the title: the file name stands in for it).
+    missing-title: bool,
+    missing-artist: bool,
+    missing-album: bool,
+    missing-number: bool,
+    missing-year: bool,
+}
+
+// A duplicate group: the shared title and artist, and its tracks, shortest first.
+export struct DuplicateBlock {
+    title: string,
+    artist: string,
+    // Marked "Not duplicates"; listed only while hidden groups are shown.
+    hidden: bool,
+    tracks: [CheckTrack],
+}
+
+// An album's tracks that lack tags.
+export struct GapBlock {
+    title: string,
+    artist: string,
+    // The "Unknown" album of tracks without an album tag; the UI names it.
+    unknown: bool,
+    tracks: [CheckTrack],
+}
+
+// An album without a cover.
+export struct CoverlessAlbum {
+    title: string,
+    artist: string,
+    year: string,
+    track-count: int,
+}
+
+// The Library check page, opened from Settings → Music folders: what src/library_check.rs
+// found, and what the user does about it. Nothing here deletes or moves a file.
+export global LibraryCheck {
+    // The page is shown in place of Settings.
+    in-out property <bool> open;
+    in-out property <CheckTab> tab;
+    // Groups marked "Not duplicates" are listed too.
+    in property <bool> show-hidden;
+    in property <[DuplicateBlock]> duplicates;
+    // Groups not marked, and those marked.
+    in property <int> duplicate-count;
+    in property <int> hidden-count;
+    in property <[GapBlock]> gaps;
+    in property <int> gap-album-count;
+    in property <int> gap-track-count;
+    in property <[CoverlessAlbum]> coverless;
+    in property <int> coverless-count;
+    // A tab lists only so many; "Show more" lists more.
+    in property <bool> more-duplicates;
+    in property <bool> more-gaps;
+    in property <bool> more-coverless;
+    // Reads what the check finds and opens the page.
+    callback show();
+    callback show-more(CheckTab);
+    callback set-show-hidden(bool);
+    // A track of a list's block: n, then the track (-1: every track of the block).
+    callback play(CheckList, int, int);
+    callback edit-tags(CheckList, int, int);
+    callback reveal(CheckList, int, int);
+    callback not-duplicates(int);
+    callback show-again(int);
+    // Opens the cover picker for album n of Missing covers.
+    callback find-cover(int);
+}
+
+// A missing field, named.
+component Marker {
+    in property <string> text;
+
+    HorizontalLayout {
+        padding-left: Theme.space-s;
+        padding-right: Theme.space-s;
+        padding-top: 2px;
+        padding-bottom: 2px;
+
+        Rectangle {
+            border-radius: Theme.radius-m;
+            border-width: 1px;
+            border-color: Theme.colors.outline;
+
+            HorizontalLayout {
+                padding-left: Theme.space-s;
+                padding-right: Theme.space-s;
+
+                Text {
+                    text: root.text;
+                    color: Theme.colors.text;
+                    font-size: Theme.font-small;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+// One track: play, what it is, then Edit tags and Show in the file manager.
+component CheckTrackLine {
+    in property <CheckTrack> track;
+    // Duplicates show where the file is; Missing tags what it lacks.
+    in property <bool> show-path;
+    in property <bool> show-missing;
+    callback play();
+    callback edit();
+    callback reveal();
+
+    accessible-role: list-item;
+    accessible-label: root.track.title;
+    accessible-description: root.show-path ? root.track.path : "";
+
+    HorizontalLayout {
+        spacing: Theme.space-m;
+
+        VerticalLayout {
+            alignment: center;
+
+            IconButton {
+                glyph: Glyph.play;
+                label: @tr("Play {}", root.track.title);
+                clicked => {
+                    root.play();
+                }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: Theme.space-xs;
+            horizontal-stretch: 1;
+
+            HorizontalLayout {
+                spacing: Theme.space-s;
+
+                if root.track.number != "": Text {
+                    text: root.track.number;
+                    color: Theme.colors.text-muted;
+                    font-size: Theme.font-body;
+                    horizontal-stretch: 0;
+                }
+                Text {
+                    text: root.track.title;
+                    color: Theme.colors.text;
+                    font-size: Theme.font-body;
+                    font-weight: Theme.weight-strong;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            Text {
+                text: root.track.details;
+                color: Theme.colors.text-muted;
+                font-size: Theme.font-small;
+                overflow: elide;
+            }
+
+            if root.show-path: Text {
+                text: root.track.short-path;
+                color: Theme.colors.text-muted;
+                font-size: Theme.font-small;
+                overflow: elide;
+            }
+
+            if root.show-missing: HorizontalLayout {
+                alignment: start;
+
+                if root.track.missing-title: Marker {
+                    text: @tr("No title");
+                }
+                if root.track.missing-artist: Marker {
+                    text: @tr("No artist");
+                }
+                if root.track.missing-album: Marker {
+                    text: @tr("No album");
+                }
+                if root.track.missing-number: Marker {
+                    text: @tr("No track number");
+                }
+                if root.track.missing-year: Marker {
+                    text: @tr("No year");
+                }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+
+            Button {
+                text: @tr("Edit tags…");
+                label: @tr("Edit the tags of {}", root.track.title);
+                clicked => {
+                    root.edit();
+                }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+
+            IconButton {
+                glyph: Glyph.folder;
+                label: @tr("Show {} in the file manager", root.track.title);
+                clicked => {
+                    root.reveal();
+                }
+            }
+        }
+    }
+}
+
+// A block's heading: its name, a line under it, and the block's action.
+component BlockHeading {
+    in property <string> title;
+    in property <string> subtitle;
+
+    HorizontalLayout {
+        spacing: Theme.space-m;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: Theme.space-xs;
+            horizontal-stretch: 1;
+
+            Text {
+                text: root.title;
+                color: Theme.colors.text;
+                font-size: Theme.font-heading;
+                font-weight: Theme.weight-strong;
+                wrap: word-wrap;
+                min-height: self.preferred-height;
+            }
+            Text {
+                text: root.subtitle;
+                color: Theme.colors.text-muted;
+                font-size: Theme.font-small;
+                wrap: word-wrap;
+                min-height: self.preferred-height;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
+
+            @children
+        }
+    }
+}
+
+// What a tab says when it found nothing.
+component Nothing inherits Text {
+    color: Theme.colors.text-muted;
+    font-size: Theme.font-body;
+    wrap: word-wrap;
+    min-height: self.preferred-height;
+}
+
+// The page: back to Settings, the tabs with their counts, the rule of the tab shown
+// and its list. Escape goes back.
+export component LibraryCheckPage {
+    forward-focus: back-button;
+    init => {
+        back-button.focus();
+    }
+
+    FocusScope {
+        width: parent.width;
+        height: parent.height;
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                LibraryCheck.open = false;
+                return accept;
+            }
+            reject
+        }
+
+        ScrollArea {
+            width: parent.width;
+            height: parent.height;
+
+            VerticalLayout {
+                padding: Theme.space-xxl;
+                padding-top: Theme.space-xl;
+                spacing: Theme.space-xl;
+                alignment: start;
+
+                HorizontalLayout {
+                    alignment: start;
+
+                    back-button := BackButton {
+                        label: @tr("Settings");
+                        clicked => {
+                            LibraryCheck.open = false;
+                        }
+                    }
+                }
+
+                Text {
+                    text: @tr("Library check");
+                    color: Theme.colors.text;
+                    font-size: Theme.font-title;
+                    font-weight: Theme.weight-strong;
+                }
+
+                HorizontalLayout {
+                    alignment: start;
+
+                    SegmentedChoice {
+                        label: @tr("Library check");
+                        segment-min: 176px;
+                        options: [
+                            @tr("Duplicates ({})", LibraryCheck.duplicate-count),
+                            @tr("Missing tags ({})", LibraryCheck.gap-track-count),
+                            @tr("Missing covers ({})", LibraryCheck.coverless-count),
+                        ];
+                        current-index: LibraryCheck.tab == CheckTab.missing-tags ? 1 : LibraryCheck.tab == CheckTab.missing-covers ? 2 : 0;
+                        selected(index) => {
+                            LibraryCheck.tab = index == 1 ? CheckTab.missing-tags : index == 2 ? CheckTab.missing-covers : CheckTab.duplicates;
+                        }
+                    }
+                }
+
+                if LibraryCheck.tab == CheckTab.duplicates: VerticalLayout {
+                    spacing: Theme.space-xl;
+
+                    Text {
+                        text: @tr("Tracks with the same title and artist, ignoring case and accents, whose lengths are each within 2 seconds of the next. Tracks without an artist, or titled only by their file name, are left out. VCMP deletes nothing: remove a copy you don't want in the file manager.");
+                        color: Theme.colors.text-muted;
+                        font-size: Theme.font-body;
+                        wrap: word-wrap;
+                        min-height: self.preferred-height;
+                    }
+
+                    if LibraryCheck.hidden-count > 0: HorizontalLayout {
+                        alignment: start;
+
+                        Toggle {
+                            label: @tr("Show the {n} group marked Not duplicates" | "Show the {n} groups marked Not duplicates" % LibraryCheck.hidden-count);
+                            checked: LibraryCheck.show-hidden;
+                            toggled(on) => {
+                                LibraryCheck.set-show-hidden(on);
+                            }
+                        }
+                    }
+
+                    if LibraryCheck.duplicates.length == 0: Nothing {
+                        text: @tr("No duplicates found.");
+                    }
+
+                    for group[block] in LibraryCheck.duplicates: VerticalLayout {
+                        spacing: Theme.space-s;
+
+                        BlockHeading {
+                            title: group.title;
+                            subtitle: group.hidden ? @tr("{} · marked Not duplicates", group.artist) : @tr("{0} · {n} copy" | "{0} · {n} copies" % group.tracks.length, group.artist);
+
+                            Button {
+                                text: group.hidden ? @tr("Show again") : @tr("Not duplicates");
+                                label: group.hidden ? @tr("Show {} again", group.title) : @tr("{} are not duplicates", group.title);
+                                clicked => {
+                                    if group.hidden {
+                                        LibraryCheck.show-again(block);
+                                    } else {
+                                        LibraryCheck.not-duplicates(block);
+                                    }
+                                }
+                            }
+                        }
+
+                        for track[index] in group.tracks: CheckTrackLine {
+                            track: track;
+                            show-path: true;
+                            play => {
+                                LibraryCheck.play(CheckList.duplicates, block, index);
+                            }
+                            edit => {
+                                LibraryCheck.edit-tags(CheckList.duplicates, block, index);
+                            }
+                            reveal => {
+                                LibraryCheck.reveal(CheckList.duplicates, block, index);
+                            }
+                        }
+                    }
+
+                    if LibraryCheck.more-duplicates: HorizontalLayout {
+                        alignment: start;
+
+                        Button {
+                            text: @tr("Show more");
+                            label: @tr("Show more duplicates");
+                            clicked => {
+                                LibraryCheck.show-more(CheckTab.duplicates);
+                            }
+                        }
+                    }
+                }
+
+                if LibraryCheck.tab == CheckTab.missing-tags: VerticalLayout {
+                    spacing: Theme.space-xl;
+
+                    Text {
+                        text: @tr("Tracks without a title, artist, album, track number or year, by album. A title VCMP took from the file name counts as missing.");
+                        color: Theme.colors.text-muted;
+                        font-size: Theme.font-body;
+                        wrap: word-wrap;
+                        min-height: self.preferred-height;
+                    }
+
+                    if LibraryCheck.gaps.length == 0: Nothing {
+                        text: @tr("Every track has these tags.");
+                    }
+
+                    for album[block] in LibraryCheck.gaps: VerticalLayout {
+                        spacing: Theme.space-s;
+
+                        BlockHeading {
+                            title: album.unknown ? @tr("Unknown") : album.title;
+                            subtitle: album.artist != "" ? @tr("{0} · {n} track" | "{0} · {n} tracks" % album.tracks.length, album.artist) : @tr("{n} track" | "{n} tracks" % album.tracks.length);
+
+                            Button {
+                                text: @tr("Edit tags…");
+                                label: @tr("Edit the tags of these tracks of {}", album.unknown ? @tr("Unknown") : album.title);
+                                clicked => {
+                                    LibraryCheck.edit-tags(CheckList.missing-tags, block, -1);
+                                }
+                            }
+                        }
+
+                        for track[index] in album.tracks: CheckTrackLine {
+                            track: track;
+                            show-missing: true;
+                            play => {
+                                LibraryCheck.play(CheckList.missing-tags, block, index);
+                            }
+                            edit => {
+                                LibraryCheck.edit-tags(CheckList.missing-tags, block, index);
+                            }
+                            reveal => {
+                                LibraryCheck.reveal(CheckList.missing-tags, block, index);
+                            }
+                        }
+                    }
+
+                    if LibraryCheck.more-gaps: HorizontalLayout {
+                        alignment: start;
+
+                        Button {
+                            text: @tr("Show more");
+                            label: @tr("Show more albums");
+                            clicked => {
+                                LibraryCheck.show-more(CheckTab.missing-tags);
+                            }
+                        }
+                    }
+                }
+
+                if LibraryCheck.tab == CheckTab.missing-covers: VerticalLayout {
+                    spacing: Theme.space-xl;
+
+                    Text {
+                        text: @tr("Albums whose files and folders hold no cover, and that have none found online.");
+                        color: Theme.colors.text-muted;
+                        font-size: Theme.font-body;
+                        wrap: word-wrap;
+                        min-height: self.preferred-height;
+                    }
+
+                    if LibraryCheck.coverless.length == 0: Nothing {
+                        text: @tr("Every album has a cover.");
+                    }
+
+                    for album[index] in LibraryCheck.coverless: BlockHeading {
+                        accessible-role: list-item;
+                        accessible-label: album.title;
+                        title: album.title;
+                        subtitle: album.year != "" ? @tr("{0} · {1} · {n} track" | "{0} · {1} · {n} tracks" % album.track-count, album.artist, album.year) : @tr("{0} · {n} track" | "{0} · {n} tracks" % album.track-count, album.artist);
+
+                        Button {
+                            text: @tr("Find cover online");
+                            label: @tr("Find a cover for {} online", album.title);
+                            clicked => {
+                                LibraryCheck.find-cover(index);
+                            }
+                        }
+                    }
+
+                    if LibraryCheck.more-coverless: HorizontalLayout {
+                        alignment: start;
+
+                        Button {
+                            text: @tr("Show more");
+                            label: @tr("Show more albums");
+                            clicked => {
+                                LibraryCheck.show-more(CheckTab.missing-covers);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

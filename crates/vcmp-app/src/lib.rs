@@ -10,6 +10,7 @@ pub mod folders;
 pub mod icons;
 pub mod labels;
 pub mod lastfm_service;
+pub mod library_check;
 pub mod library_service;
 pub mod library_view;
 pub mod media_keys;

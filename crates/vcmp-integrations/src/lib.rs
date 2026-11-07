@@ -1,10 +1,11 @@
 //! Outside-world integrations: OS media controls, the OS reduce-motion setting, the
-//! window frame without its title bar on Windows, Last.fm scrobbling, artist photo
-//! and cover art lookup, the update check, and Discord Rich Presence. Must not depend
-//! on the UI crate.
+//! file manager (opening a folder, showing a file in it), the window frame without
+//! its title bar on Windows, Last.fm scrobbling, artist photo and cover art lookup,
+//! the update check, and Discord Rich Presence. Must not depend on the UI crate.
 
 pub mod discord;
 pub mod fanart;
+pub mod file_manager;
 pub mod lastfm;
 pub mod media_controls;
 pub mod musicbrainz;

@@ -359,6 +359,19 @@ CREATE TABLE favourites (
 
 CREATE INDEX favourites_liked ON favourites(liked_ms);
 "#,
+    r#"
+-- Duplicate groups the owner marked "Not duplicates" on the Library check page: one
+-- row per track, group_id shared by the tracks marked together. A group the check
+-- finds stays hidden while all its tracks are in one stored group; a track joining
+-- it shows it again. Tracks are never deleted, so the ids outlive moved files.
+CREATE TABLE not_duplicates (
+    group_id INTEGER NOT NULL,
+    track_id INTEGER NOT NULL REFERENCES tracks(id),
+    PRIMARY KEY (group_id, track_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX not_duplicates_track ON not_duplicates(track_id);
+"#,
 ];
 
 pub(crate) const VERSION: i64 = MIGRATIONS.len() as i64;
