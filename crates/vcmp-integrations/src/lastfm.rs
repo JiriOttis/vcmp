@@ -1,5 +1,6 @@
 //! Last.fm scrobbling: connecting an account through Last.fm's desktop
-//! authentication, "now playing" updates, and plays sent in batches.
+//! authentication, "now playing" updates, plays sent in batches, loves, and reading
+//! the tracks an account loved ([`loves`]).
 //!
 //! VCMP's API key and shared secret are compiled in from `VCMP_LASTFM_API_KEY` and
 //! `VCMP_LASTFM_SHARED_SECRET` ([`Credentials::built_in`]); a build without them has
@@ -8,9 +9,11 @@
 //! yet ([`ScrobbleStore`], the library database in the app). [`Play`] decides when a
 //! play counts.
 //!
-//! Every request is a signed POST: the parameters sorted by name, each name followed
-//! by its value, then the shared secret, hashed with MD5 ([`sign`]).
+//! Requests that act for the user are signed POSTs: the parameters sorted by name,
+//! each name followed by its value, then the shared secret, hashed with MD5
+//! ([`sign`]). Reading an account's loved tracks is a plain GET.
 
+mod loves;
 mod play;
 mod scrobbler;
 
@@ -20,9 +23,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Deserializer};
 
+pub use loves::{Imported, LOVED_PAGE_SIZE, Love, Loved, LovedPage, match_key, match_loved};
 pub use play::{MAX_WAIT, MIN_LENGTH, Play, scrobble_point};
 pub use scrobbler::{
-    ConnectError, Keyring, MemorySessions, Report, ScrobbleStore, Scrobbler, SessionStore, Timing,
+    ConnectError, ImportError, Keyring, LoveStore, MemorySessions, Report, ScrobbleStore,
+    Scrobbler, SessionStore, Timing,
 };
 
 use crate::musicbrainz::USER_AGENT;
@@ -203,6 +208,8 @@ pub fn sign(params: &[(&str, &str)], secret: &str) -> String {
 pub trait Transport: Send + 'static {
     /// POSTs `form`, URL-encoded, to `url`, returning the status and the body.
     fn post(&mut self, url: &str, form: &[(String, String)]) -> Result<(u16, String), String>;
+    /// GETs `url` with `query` added to it, returning the status and the body.
+    fn get(&mut self, url: &str, query: &[(String, String)]) -> Result<(u16, String), String>;
 }
 
 /// The real network.
@@ -230,19 +237,34 @@ impl Default for Http {
 
 impl Transport for Http {
     fn post(&mut self, url: &str, form: &[(String, String)]) -> Result<(u16, String), String> {
-        let mut response = self
+        let response = self
             .agent
             .post(url)
             .header("Accept", "application/json")
             .send_form(form.iter().map(|(name, value)| (name, value)))
             .map_err(|error| error.to_string())?;
-        let status = response.status().as_u16();
-        let body = response
-            .body_mut()
-            .read_to_string()
-            .map_err(|error| error.to_string())?;
-        Ok((status, body))
+        read(response)
     }
+
+    fn get(&mut self, url: &str, query: &[(String, String)]) -> Result<(u16, String), String> {
+        let response = self
+            .agent
+            .get(url)
+            .header("Accept", "application/json")
+            .query_pairs(query.iter().map(|(name, value)| (name, value)))
+            .call()
+            .map_err(|error| error.to_string())?;
+        read(response)
+    }
+}
+
+fn read(mut response: ureq::http::Response<ureq::Body>) -> Result<(u16, String), String> {
+    let status = response.status().as_u16();
+    let body = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|error| error.to_string())?;
+    Ok((status, body))
 }
 
 /// Last.fm's API, signed with VCMP's credentials.
@@ -331,9 +353,20 @@ impl<T: Transport> Client<T> {
     fn call<R: DeserializeOwned>(
         &mut self,
         method: &str,
-        mut params: Vec<(String, String)>,
+        params: Vec<(String, String)>,
         session_key: Option<&str>,
     ) -> Result<R, Error> {
+        let (status, body) = self.signed_post(method, params, session_key)?;
+        parse(status, &body)
+    }
+
+    /// Sends a signed request and returns Last.fm's status and body as they came.
+    fn signed_post(
+        &mut self,
+        method: &str,
+        mut params: Vec<(String, String)>,
+        session_key: Option<&str>,
+    ) -> Result<(u16, String), Error> {
         params.push(("method".into(), method.into()));
         params.push(("api_key".into(), self.credentials.api_key.clone()));
         if let Some(key) = session_key {
@@ -346,11 +379,9 @@ impl<T: Transport> Client<T> {
         let signature = sign(&pairs, &self.credentials.secret);
         params.push(("api_sig".into(), signature));
         params.push(("format".into(), "json".into()));
-        let (status, body) = self
-            .transport
+        self.transport
             .post(API_URL, &params)
-            .map_err(Error::Network)?;
-        parse(status, &body)
+            .map_err(Error::Network)
     }
 }
 
@@ -434,14 +465,19 @@ struct Counts {
 }
 
 /// A count, which Last.fm's JSON gives as a number or as a string.
-fn count<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D::Error> {
+fn count<'de, D, N>(deserializer: D) -> Result<N, D::Error>
+where
+    D: Deserializer<'de>,
+    N: Deserialize<'de> + std::str::FromStr,
+    N::Err: fmt::Display,
+{
     #[derive(Deserialize)]
     #[serde(untagged)]
-    enum Count {
-        Number(usize),
+    enum Count<N> {
+        Number(N),
         Text(String),
     }
-    match Count::deserialize(deserializer)? {
+    match Count::<N>::deserialize(deserializer)? {
         Count::Number(number) => Ok(number),
         Count::Text(text) => text.trim().parse().map_err(serde::de::Error::custom),
     }
@@ -488,6 +524,14 @@ pub(crate) mod tests {
                 .unwrap()
                 .pop_front()
                 .unwrap_or_else(|| panic!("no answer scripted for {method}"))
+        }
+
+        /// Recorded like a POST, with `get` added as its first pair, so tests can
+        /// tell the two apart.
+        fn get(&mut self, url: &str, query: &[(String, String)]) -> Result<(u16, String), String> {
+            let mut form = vec![("get".to_string(), String::new())];
+            form.extend_from_slice(query);
+            self.post(url, &form)
         }
     }
 

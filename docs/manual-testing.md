@@ -395,6 +395,21 @@ animated WebP and an APNG. For album covers, edit copies only.
       scrobble. **(never seen working with a real account)**
 - [ ] Last.fm offline: play a few tracks without network, reconnect: the plays
       arrive. Revoke VCMP's access on last.fm: the row asks to connect again.
+- [ ] Love on Last.fm (build with the keys, an account connected): the switch is
+      off; heart a track and nothing shows on last.fm. Switch it on, heart another:
+      it shows as loved on your last.fm profile. Take the heart away: it is no
+      longer loved there. An album's "Add to Favourites" loves each of its tracks.
+      **(never seen working with a real account)**
+- [ ] Loves offline: with the switch on and no network, heart two tracks: the row
+      says "2 loves and unloves wait to be sent". With the network back they arrive
+      (within the backoff, at most 30 minutes).
+- [ ] Import loved tracks from Last.fm, on an account with more than 200 loved
+      tracks: the row counts pages ("page 2 of 3…") and the button is disabled;
+      afterwards it says how many are in Favourites and how many matched nothing.
+      The new hearts show at once, ordered by their love dates in Favourites, and
+      nothing new is loved on last.fm. Running it again adds nothing new.
+      **(never seen working with a real account; checks that 200 a page is
+      accepted)**
 - [ ] Update check: once the repository is public and has a release newer than the
       build, the sidebar and About show "VCMP x.y.z is available" and open its
       page; turning the setting off hides it. While the repository is private the

@@ -5,6 +5,8 @@
 //! and unlikes. It writes the database, keeps the liked set for this thread, then
 //! shows the change everywhere: the liked flag of every row on screen (track lists,
 //! the songs table, the queue), the player bar's heart, and the Favourites playlist.
+//! The tracks whose heart changed go to the [`LoveSink`], which loves them on
+//! Last.fm while "Love on Last.fm" is on.
 //!
 //! - **Rows** carry their track's id and whether it is liked. Every list builds its
 //!   rows from tracks, in several modules, so [`liked`] reads the set this module
@@ -19,7 +21,7 @@ use std::collections::HashSet;
 use std::rc::{Rc, Weak};
 
 use slint::{ComponentHandle, Model, ModelRc};
-use vcmp_library::{AlbumId, Library, TrackId};
+use vcmp_library::{AlbumId, Library, Track, TrackId};
 
 use crate::playlists::PlaylistBrowser;
 use crate::selection::{self, Selectable};
@@ -42,10 +44,17 @@ pub fn row_id(track: TrackId) -> i32 {
     track.0 as i32
 }
 
+/// Told of every heart given or taken away: Last.fm, which loves the tracks.
+pub trait LoveSink {
+    /// `tracks` were liked (`liked`) or taken out of the favourites, just now.
+    fn hearts_changed(&self, tracks: &[Track], liked: bool);
+}
+
 pub struct Hearts {
     window: slint::Weak<AppWindow>,
     library: Rc<Library>,
     playlists: RefCell<Weak<PlaylistBrowser>>,
+    love_sink: RefCell<Option<Weak<dyn LoveSink>>>,
 }
 
 impl Hearts {
@@ -56,6 +65,7 @@ impl Hearts {
             window: window.as_weak(),
             library,
             playlists: RefCell::default(),
+            love_sink: RefCell::default(),
         });
         hearts.reload();
 
@@ -124,6 +134,18 @@ impl Hearts {
         *self.playlists.borrow_mut() = playlists;
     }
 
+    /// Where hearts given or taken away from now on are told.
+    pub fn set_love_sink(&self, sink: Weak<dyn LoveSink>) {
+        *self.love_sink.borrow_mut() = Some(sink);
+    }
+
+    /// Reads the liked tracks again and shows them everywhere, after something other
+    /// than the hearts changed them (an import of Last.fm loves).
+    pub fn refresh(&self) {
+        self.reload();
+        self.show();
+    }
+
     /// Reads the liked tracks again.
     pub fn reload(&self) {
         let liked = self.library.liked_tracks().unwrap_or_else(|error| {
@@ -139,19 +161,45 @@ impl Hearts {
         if tracks.is_empty() {
             return;
         }
+        let changed: Vec<TrackId> = tracks
+            .iter()
+            .copied()
+            .filter(|track| liked(*track) != like)
+            .collect();
         let result = if like {
             self.library.like(tracks)
         } else {
             self.library.unlike(tracks)
         };
-        if let Err(error) = result {
-            log::error!(
+        match result {
+            Ok(()) => self.tell_sink(&changed, like),
+            Err(error) => log::error!(
                 "could not change the favourites of {} tracks: {error}",
                 tracks.len()
-            );
+            ),
         }
         self.reload();
         self.show();
+    }
+
+    /// Tells the sink which tracks gained or lost their heart.
+    fn tell_sink(&self, changed: &[TrackId], like: bool) {
+        let Some(sink) = self.love_sink.borrow().as_ref().and_then(Weak::upgrade) else {
+            return;
+        };
+        if changed.is_empty() {
+            return;
+        }
+        let tracks: Vec<Track> = changed
+            .iter()
+            .filter_map(|id| {
+                self.library.track(*id).unwrap_or_else(|error| {
+                    log::warn!("could not read track {}: {error}", id.0);
+                    None
+                })
+            })
+            .collect();
+        sink.hearts_changed(&tracks, like);
     }
 
     /// Likes the tracks, unless every one is liked: then takes them all out.

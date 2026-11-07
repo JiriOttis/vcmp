@@ -1,24 +1,31 @@
 //! Last.fm behind the `LastfmState` global: connecting an account through Last.fm's
-//! page in the browser, who is connected, and the plays `PlayerService` hands over.
-//! Plays wait in the library database (`scrobble_queue`) until the scrobbler thread
-//! has sent them; the account's session key is in the OS keyring, and only its user
-//! name is in the settings.
+//! page in the browser, who is connected, the plays `PlayerService` hands over, the
+//! hearts `Hearts` hands over while "Love on Last.fm" is on, and importing the
+//! account's loved tracks into Favourites. Plays and loves wait in the library
+//! database (`scrobble_queue`, `love_queue`) until the scrobbler thread has sent
+//! them; the account's session key is in the OS keyring, and only its user name is
+//! in the settings.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
+use std::time::SystemTime;
 
 use slint::ComponentHandle;
 use vcmp_integrations::lastfm::{
-    self, Client, ConnectError, Credentials, Keyring, Report, ScrobbleStore, Scrobbler, Timing,
+    self, Client, ConnectError, Credentials, ImportError, Imported, Keyring, LoveStore, Loved,
+    Report, ScrobbleStore, Scrobbler, Timing,
 };
-use vcmp_library::{Library, QueuedScrobble};
+use vcmp_library::{Library, QueuedLove, QueuedScrobble, Track};
 
+use crate::favourites::{Hearts, LoveSink};
 use crate::library_service::LibraryPaths;
 use crate::player_service::ScrobbleSink;
-use crate::{AppWindow, LastfmProblem, LastfmState, LastfmStatus};
+use crate::{AppWindow, LastfmImport, LastfmProblem, LastfmState, LastfmStatus};
 
 /// Setting key: the connected account's Last.fm user name; absent or empty for none.
 pub const SETTING_USER: &str = "lastfm.user";
+/// Setting key: "Love on Last.fm", `1` for on; off when absent.
+pub const SETTING_LOVE: &str = "lastfm.love";
 
 /// The scrobbler thread, or a recorder in tests.
 pub trait LastfmWorker {
@@ -29,6 +36,10 @@ pub trait LastfmWorker {
     fn now_playing(&self, track: lastfm::Track);
     /// Plays were added to the queue.
     fn flush(&self);
+    /// Loves or unloves were added to the queue.
+    fn flush_loves(&self);
+    /// Reads the account's loved tracks and likes the matching library tracks.
+    fn import_loved(&self);
 }
 
 impl LastfmWorker for Scrobbler {
@@ -54,6 +65,14 @@ impl LastfmWorker for Scrobbler {
 
     fn flush(&self) {
         Scrobbler::flush(self);
+    }
+
+    fn flush_loves(&self) {
+        Scrobbler::flush_loves(self);
+    }
+
+    fn import_loved(&self) {
+        Scrobbler::import_loved(self);
     }
 }
 
@@ -104,6 +123,48 @@ impl ScrobbleStore for QueueStore {
     }
 }
 
+impl LoveStore for QueueStore {
+    fn oldest_loves(&mut self, limit: usize) -> Result<Vec<(i64, lastfm::Love)>, String> {
+        let queued = self
+            .0
+            .queued_loves(limit)
+            .map_err(|error| error.to_string())?;
+        Ok(queued
+            .into_iter()
+            .map(|QueuedLove { id, love }| {
+                let love = lastfm::Love {
+                    artist: love.artist,
+                    title: love.title,
+                    love: love.love,
+                };
+                (id, love)
+            })
+            .collect())
+    }
+
+    fn remove_loves(&mut self, ids: &[i64]) -> Result<(), String> {
+        self.0.remove_loves(ids).map_err(|error| error.to_string())
+    }
+
+    fn clear_loves(&mut self) -> Result<(), String> {
+        self.0.clear_loves().map_err(|error| error.to_string())
+    }
+
+    /// Likes every library track, available or not, whose artist and title match a
+    /// loved track, as of its love date (now, when Last.fm gives none).
+    fn like_loved(&mut self, loved: &[Loved]) -> Result<Imported, String> {
+        let tracks = self.0.track_names().map_err(|error| error.to_string())?;
+        let (likes, imported) = lastfm::match_loved(loved, tracks);
+        let now = SystemTime::now();
+        let likes: Vec<_> = likes
+            .into_iter()
+            .map(|(track, at)| (track, at.unwrap_or(now)))
+            .collect();
+        self.0.like_at(&likes).map_err(|error| error.to_string())?;
+        Ok(imported)
+    }
+}
+
 thread_local! {
     /// The service scrobbler reports are delivered to, on the UI thread.
     static SERVICE: RefCell<Weak<LastfmService>> = RefCell::default();
@@ -150,6 +211,8 @@ pub struct LastfmService {
     open_url: OpenUrl,
     // The page where the user allows VCMP, while connecting.
     auth_url: RefCell<Option<String>>,
+    // Shown again after an import likes tracks.
+    hearts: RefCell<Weak<Hearts>>,
 }
 
 impl LastfmService {
@@ -166,11 +229,13 @@ impl LastfmService {
             worker,
             open_url,
             auth_url: RefCell::default(),
+            hearts: RefCell::default(),
         });
         SERVICE.with(|current| *current.borrow_mut() = Rc::downgrade(&service));
 
         let state = window.global::<LastfmState>();
         state.set_available(true);
+        state.set_love(service.love_saved());
         if let Some(user) = service.saved_user() {
             state.set_status(LastfmStatus::Connected);
             state.set_user(user.as_str().into());
@@ -196,7 +261,22 @@ impl LastfmService {
                 service.open(&url);
             }
         }));
+        state.on_import_loved(with(LastfmService::import_loved));
+        let weak = Rc::downgrade(&service);
+        state.on_set_love(move |on| {
+            if let Some(service) = weak.upgrade() {
+                service.set_love(on);
+            }
+        });
         service
+    }
+
+    /// Hears every heart given or taken away from now on, and shows an import's
+    /// likes through them.
+    pub fn attach(self: &Rc<Self>, hearts: &Rc<Hearts>) {
+        *self.hearts.borrow_mut() = Rc::downgrade(hearts);
+        let sink: Weak<dyn LoveSink> = Rc::downgrade(self) as Weak<dyn LoveSink>;
+        hearts.set_love_sink(sink);
     }
 
     /// Runs `report` through the service on the UI thread, from any thread. False
@@ -267,10 +347,85 @@ impl LastfmService {
                 state.set_status(LastfmStatus::Disconnected);
                 set_problem(&state, LastfmProblem::Rejected, "");
             }
-            Report::Sent(_) => {}
+            Report::Sent(_) | Report::Loved(_) => {}
+            Report::ImportProgress { page, pages } => {
+                state.set_import_page(page as i32);
+                state.set_import_pages(pages as i32);
+            }
+            Report::Imported(imported) => {
+                state.set_importing(false);
+                state.set_import_matched(imported.matched as i32);
+                state.set_import_unmatched(imported.unmatched as i32);
+                state.set_import_result(LastfmImport::Done);
+                if let Some(hearts) = self.hearts.borrow().upgrade() {
+                    hearts.refresh();
+                }
+            }
+            Report::ImportFailed(error) => {
+                state.set_importing(false);
+                let (result, detail) = match error {
+                    ImportError::NoAccount => (LastfmImport::NoAccount, String::new()),
+                    ImportError::Lastfm(error) => {
+                        log::info!("importing loved tracks failed: {error}");
+                        (LastfmImport::Failed, error.to_string())
+                    }
+                    ImportError::Library(error) => {
+                        log::error!("could not like the loved tracks: {error}");
+                        (LastfmImport::NotLiked, error)
+                    }
+                };
+                state.set_import_result(result);
+                state.set_import_detail(detail.into());
+            }
             Report::Authorize(_) | Report::ConnectFailed(_) => {}
         }
         self.show_unsent();
+    }
+
+    fn import_loved(&self) {
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        let state = window.global::<LastfmState>();
+        if state.get_importing() || !self.connected() {
+            return;
+        }
+        state.set_importing(true);
+        state.set_import_page(0);
+        state.set_import_pages(0);
+        state.set_import_result(LastfmImport::None);
+        state.set_import_detail("".into());
+        self.worker.import_loved();
+    }
+
+    /// "Love on Last.fm": hearts from now on are sent, or no longer queued. Loves
+    /// waiting already still go out.
+    fn set_love(&self, on: bool) {
+        if let Some(window) = self.window.upgrade() {
+            window.global::<LastfmState>().set_love(on);
+        }
+        if let Err(error) = self
+            .library
+            .set_setting(SETTING_LOVE, if on { "1" } else { "0" })
+        {
+            log::warn!("could not save setting {SETTING_LOVE}: {error}");
+        }
+    }
+
+    fn love_saved(&self) -> bool {
+        self.library
+            .setting(SETTING_LOVE)
+            .unwrap_or_else(|error| {
+                log::warn!("could not read setting {SETTING_LOVE}: {error}");
+                None
+            })
+            .is_some_and(|value| value == "1")
+    }
+
+    fn love_on(&self) -> bool {
+        self.window
+            .upgrade()
+            .is_some_and(|window| window.global::<LastfmState>().get_love())
     }
 
     fn start_connecting(&self) {
@@ -308,8 +463,12 @@ impl LastfmService {
         state.set_status(LastfmStatus::Disconnected);
         state.set_user("".into());
         set_problem(&state, LastfmProblem::None, "");
-        // The scrobbler empties the queue, after any batch it is sending.
+        // The scrobbler empties the queues, after any request it is sending, and
+        // stops an import.
         state.set_unsent(0);
+        state.set_unsent_loves(0);
+        state.set_importing(false);
+        state.set_import_result(LastfmImport::None);
     }
 
     fn open(&self, url: &str) {
@@ -347,7 +506,13 @@ impl LastfmService {
                 log::warn!("could not count the scrobble queue: {error}");
                 0
             });
-        window.global::<LastfmState>().set_unsent(unsent as i32);
+        let loves = self.library.queued_love_count().unwrap_or_else(|error| {
+            log::warn!("could not count the love queue: {error}");
+            0
+        });
+        let state = window.global::<LastfmState>();
+        state.set_unsent(unsent as i32);
+        state.set_unsent_loves(loves as i32);
     }
 
     fn saved_user(&self) -> Option<String> {
@@ -397,6 +562,34 @@ impl ScrobbleSink for LastfmService {
         match queued {
             Ok(_) => self.worker.flush(),
             Err(error) => log::warn!("could not queue a play for Last.fm: {error}"),
+        }
+        self.show_unsent();
+    }
+}
+
+impl LoveSink for LastfmService {
+    /// Queued only while an account is connected and "Love on Last.fm" is on. Tracks
+    /// without an artist can't be loved, as they can't be scrobbled.
+    fn hearts_changed(&self, tracks: &[Track], liked: bool) {
+        if !self.connected() || !self.love_on() {
+            return;
+        }
+        let loves: Vec<vcmp_library::Love> = tracks
+            .iter()
+            .filter_map(|track| {
+                Some(vcmp_library::Love {
+                    artist: track.artist.clone()?,
+                    title: track.title.clone(),
+                    love: liked,
+                })
+            })
+            .collect();
+        if loves.is_empty() {
+            return;
+        }
+        match self.library.queue_loves(&loves) {
+            Ok(()) => self.worker.flush_loves(),
+            Err(error) => log::warn!("could not queue loves for Last.fm: {error}"),
         }
         self.show_unsent();
     }

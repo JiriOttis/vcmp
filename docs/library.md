@@ -67,6 +67,7 @@ the CHECK on its kind, doesn't delete the rows that refer to it.
 | `track_labels` | Which track holds which label, and since when; deleting a label deletes its rows (version 12) |
 | `change_labels` | The labels a label set creates when accepted, and whether it did or found one of that name (version 12) |
 | `favourites` | The tracks the owner liked, one row each, and when (version 13; see [Favourites](#favourites)) |
+| `love_queue` | Loves and unloves waiting to be sent to Last.fm: artist, title and love or unlove, oldest first, one row per artist and title (version 14). A newer entry replaces the waiting one with a new id, so the one being sent as it is replaced isn't mistaken for it |
 
 Paths are stored as platform-native bytes (`src/path_codec.rs`), so file names that
 aren't valid UTF-8 keep working.
@@ -534,6 +535,15 @@ only. The agreed decisions are in the
   and `favourites_summary` (count, available count, duration, for the card).
 - **M3U export:** `Library::export_favourites` writes them newest first through the
   same writer as `export_playlist`.
+- **Last.fm import:** `like_at` likes tracks as of given times (Last.fm's love
+  dates); a track liked already keeps its own time, and an id that is no track is
+  skipped. `track_names` gives every track's id, artist and title, available or
+  not, for the tracks with an artist; the matching itself is
+  `vcmp_integrations::lastfm::match_loved` ([ui.md](ui.md#playback), "Last.fm
+  scrobbling").
+- **Love queue** (`src/loves.rs`): `queue_loves`, `queued_loves`,
+  `queued_love_count`, `remove_loves` and `clear_loves`, like the scrobble queue.
+  Loves hold the artist and title as they were, which is how Last.fm knows a track.
 
 ## Measured
 

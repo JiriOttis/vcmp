@@ -27,7 +27,9 @@ A player for the music files on your own drives, for Windows 10 and newer and Li
   your files.
 - Favourites: like a track with the heart in a track list or the player bar, or a
   whole album from its menu. Liked tracks gather in a Favourites playlist, first
-  among your playlists, newest first, which you can play, shuffle or export.
+  among your playlists, newest first, which you can play, shuffle or export. With
+  Last.fm connected, your hearts can be loved there too, and the tracks you loved
+  on Last.fm can be brought into Favourites.
 - Finds missing album covers online (the Cover Art Archive, through MusicBrainz) and
   artist photos on fanart.tv. You can use your own pictures instead, and give
   playlists one too. An animated GIF, WebP or PNG plays on its album's, artist's or
