@@ -141,7 +141,12 @@ fn line(ms: u64, text: &str) -> LyricLine {
 
 fn synced() -> LocalLyrics {
     LocalLyrics {
-        embedded_synced: Some(vec![line(0, "One"), line(400, "Two"), line(800, "Three")]),
+        embedded_synced: Some(vec![
+            line(0, "One"),
+            line(400, "Two"),
+            line(800, "Three"),
+            line(900, "Four"),
+        ]),
         ..LocalLyrics::default()
     }
 }
@@ -223,7 +228,7 @@ fn synced_lyrics_follow_the_position_and_the_clock() {
     let app = start(|_| {});
     app.play("1.flac", synced());
     assert!(app.state().get_has_lyrics() && app.state().get_lyrics_synced());
-    assert_eq!(app.lines(), ["One", "Two", "Three"]);
+    assert_eq!(app.lines(), ["One", "Two", "Three", "Four"]);
     assert_eq!(app.state().get_lyrics_current(), 0);
 
     app.service
@@ -237,6 +242,12 @@ fn synced_lyrics_follow_the_position_and_the_clock() {
         app.state().get_lyrics_current(),
         2,
         "the next line comes on time, between positions"
+    );
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(150));
+    assert_eq!(
+        app.state().get_lyrics_current(),
+        3,
+        "the timer sets itself for the line after"
     );
 
     app.sent.take();
