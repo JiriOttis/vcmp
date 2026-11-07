@@ -18,11 +18,14 @@ use vcmp_library::{
 };
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
-const FORMATS: [(&str, &str); 4] = [
+const FORMATS: [(&str, &str); 7] = [
     ("silence.mp3", "mp3"),
     ("silence.flac", "flac"),
     ("silence.ogg", "ogg"),
     ("silence.wav", "wav"),
+    ("silence.aiff", "aiff"),
+    ("silence.m4a", "m4a"),
+    ("silence-alac.m4a", "m4a"),
 ];
 
 struct Setup {
@@ -105,7 +108,7 @@ fn add_file(dir: &Path, name: &str, fixture: &str, title: &str) -> PathBuf {
     fs::copy(Path::new(FIXTURES).join(fixture), &path).unwrap();
     let file = lofty::read_from_path(&path).unwrap();
     let tag_type = match file.file_type() {
-        FileType::Wav => TagType::Id3v2,
+        FileType::Wav | FileType::Aiff => TagType::Id3v2,
         _ => file.primary_tag_type(),
     };
     let mut tag = Tag::new(tag_type);
@@ -130,12 +133,14 @@ fn png(colour: [u8; 3]) -> Vec<u8> {
     bytes.into_inner()
 }
 
+/// The front cover, or the first picture of a file without picture types (M4A).
 fn cover(path: &Path) -> Option<Vec<u8>> {
     let file = lofty::read_from_path(path).unwrap();
-    file.tags()
+    let pictures: Vec<&Picture> = file.tags().iter().flat_map(|tag| tag.pictures()).collect();
+    pictures
         .iter()
-        .flat_map(|tag| tag.pictures())
         .find(|picture| picture.pic_type() == PictureType::CoverFront)
+        .or_else(|| pictures.first())
         .map(|picture| picture.data().to_vec())
 }
 

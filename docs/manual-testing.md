@@ -81,7 +81,10 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
 ### Playback
 
 - [ ] An album plays through without a gap between tracks (a live or concept album
-      makes a gap easy to hear). MP3, FLAC, WAV and Ogg Vorbis all play.
+      makes a gap easy to hear). MP3, FLAC, WAV, AIFF, Ogg Vorbis and M4A (ALAC
+      and AAC) all play. An AAC album has short gaps (a known limit, see
+      docs/playback.md); an ALAC or AIFF album has none.
+- [ ] A folder with an `.m4a` music video, or an `.mp4` file: neither is listed.
 - [ ] Spin the mouse wheel fast (a free-spinning wheel, if you have one) on Albums,
       Songs and a long album: the page scrolls at once and glides to a stop, with
       no freeze. A touchpad still flicks.
@@ -91,9 +94,9 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
       it, a notch at a time, also with a free-spinning wheel and a touchpad. Over
       the position slider the wheel doesn't seek. Restart: the volume set by wheel
       is kept.
-- [ ] Play a FLAC or WAV file: a small waveform mark follows the artist in the
-      player bar, and pointing at it says "Lossless (FLAC)". An MP3 or Ogg file has
-      none. With Last.fm connected, a longer track shows the Last.fm mark, which
+- [ ] Play a FLAC, WAV, AIFF or ALAC file: a small waveform mark follows the
+      artist in the player bar, and pointing at it says "Lossless (FLAC)" (or
+      "Lossless (ALAC)", ...). An MP3, Ogg or AAC file has none. With Last.fm connected, a longer track shows the Last.fm mark, which
       turns to a tick once half of it (or 4 minutes) has played.
 - [ ] Shuffle, "Fewer repeats" and "Fully random": no track comes back before the
       rest have played with Fewer repeats.
@@ -167,14 +170,19 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
       each changed field, and writes only after "Write N files". A second Enter,
       Back and Escape return to the form with your values; one track still writes
       at once.
-- [ ] Change and remove the embedded cover.
+- [ ] Change and remove the embedded cover, also of an M4A (AAC and ALAC) and an
+      AIFF file. iTunes or Music, foobar2000 and Mp3tag show the new tags and cover
+      of an M4A file the editor wrote.
 - [ ] Edit the track that is playing.
 - [ ] Make a file read-only, then save: the editor names the file and the reason,
       and Try again works once it's writable.
 - [ ] On each platform, run `cargo run --release -p vcmp-library --example
       edit_check -- <music dir> 40` against your collection. It edits copies only,
       every other tag included, and should end with "0 failed edits"; each failure
-      it prints names the file and the tag.
+      it prints names the file and the tag. Before merging the M4A and AIFF
+      support, run it on a collection with real M4A (AAC and ALAC, iTunes
+      purchases and rips) and AIFF files: MP4 tag writing is lofty's least tested
+      path.
 
 ### Playlists
 

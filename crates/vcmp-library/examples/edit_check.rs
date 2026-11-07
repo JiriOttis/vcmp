@@ -61,7 +61,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .and_then(|extension| extension.to_str())
             .map(str::to_ascii_lowercase);
         if let Some(extension) = extension
-            && ["mp3", "flac", "ogg", "wav"].contains(&extension.as_str())
+            && ["mp3", "flac", "ogg", "wav", "aif", "aiff", "aifc", "m4a"]
+                .contains(&extension.as_str())
             && entry.file_type().is_file()
         {
             by_format
@@ -102,18 +103,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for track in &tracks {
         let entries_before = library.track_tags(track.id)?;
         let before = others(&entries_before);
-        // Without the kind of tag VCMP writes (a WAV with only RIFF INFO), the first
+        // Without the kind of tag VCMP writes (a WAV with only RIFF INFO, an M4A
+        // without atoms), the first
         // edit creates one, and its tags are listed from it from then on, some under
         // other names (RIFF INFO's encoder is ID3v2's encoder settings).
         let has_own_tag = lofty::read_from_path(&track.path)
             .map(|file| match track.format {
-                Some(Format::Mp3 | Format::Wav) => file.tag(TagType::Id3v2).is_some(),
+                Some(Format::Mp3 | Format::Wav | Format::Aiff) => {
+                    file.tag(TagType::Id3v2).is_some()
+                }
                 Some(Format::Flac) => file.tag(TagType::VorbisComments).is_some(),
+                Some(Format::Aac | Format::Alac) => file.tag(TagType::Mp4Ilst).is_some(),
                 _ => true,
             })
             .unwrap_or(true);
         let native = match track.format {
-            Some(Format::Mp3 | Format::Wav) => "id3:TXXX:VCMP EDIT CHECK",
+            Some(Format::Mp3 | Format::Wav | Format::Aiff) => "id3:TXXX:VCMP EDIT CHECK",
+            Some(Format::Aac | Format::Alac) => "mp4:----:com.apple.iTunes:VCMP EDIT CHECK",
             _ => "vorbis:VCMPEDITCHECK",
         };
         // The first tag the file has beyond the nine fields, rewritten with a mark.

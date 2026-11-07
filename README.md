@@ -15,7 +15,8 @@ A player for the music files on your own drives, for Windows 10 and newer and Li
 - Lets you browse by album, artist, song, folder, playlist or label, and search for
   any part of a name. Ctrl+F filters the page you are on, and the mouse's back and
   forward buttons move through the pages you have visited.
-- Plays MP3, FLAC, WAV and Ogg Vorbis without gaps between tracks, with a queue,
+- Plays MP3, FLAC, WAV, AIFF, Ogg Vorbis and M4A (AAC and ALAC) without gaps
+  between tracks (AAC leaves a short one, see [playback.md](docs/playback.md#known-limits)), with a queue,
   shuffle and repeat. The queue is still there after a restart, and you can choose
   the output device. A sleep timer stops the music at the end of a track, now or
   after 15 to 90 minutes.
