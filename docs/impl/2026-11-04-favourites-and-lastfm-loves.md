@@ -2,14 +2,16 @@
 
 Spec: docs/specs/2026-11-04-favourites-and-lastfm-loves.md
 Date: 2026-11-04
-Status: partially implemented
-Area: vcmp-library (schema, favourites, M3U export), vcmp-app (rows, hearts, menus,
-playlists, player bar, queue, navigation)
+Status: implemented (PR 2 awaiting the full test run and a real Last.fm account)
+Area: vcmp-library (schema, favourites, M3U export, love queue), vcmp-integrations
+(Last.fm love, unlove, loved tracks), vcmp-app (rows, hearts, menus, playlists,
+player bar, queue, navigation, Settings)
 
 ## What was done
 
-PR 1 of the spec, local favourites, on `feature/favourites`. PR 2 (Last.fm love,
-unlove and import) is not started.
+PR 1 of the spec, local favourites, on `feature/favourites` (merged). PR 2, Last.fm
+loves and the import, on `feature/lastfm-loves` (2026-11-07), is described in
+[PR 2: Last.fm loves and import](#pr-2-lastfm-loves-and-import).
 
 - **Library** (`crates/vcmp-library/src/favourites.rs`, `schema.rs`, `m3u.rs`):
   - Schema version 13 adds `favourites` (track id, time liked).
@@ -91,12 +93,89 @@ more tracks: `VCMP_HOME=target/fav cargo run -p vcmp-app`, then add a music fold
   whose folder is gone stays in Favourites, dimmed, as "File not found".
 - A 720 px window with a long title playing: everything in the bar stays inside.
 
-## What is missing
+## PR 2: Last.fm loves and import
 
-- PR 2 of the spec, which waits for this PR to merge:
-  - the "Love on Last.fm" switch and the love/unlove queue;
-  - the Last.fm client calls (`track.love`, `track.unlove`, `user.getLovedTracks`);
-  - the "Import loved tracks from Last.fm" button.
+### What was done
+
+- **Your decisions on the points the spec left open (2026-11-07):**
+  - switching "Love on Last.fm" off keeps the loves waiting, which still go out;
+  - the import shows "page X of Y" while it runs;
+  - waiting loves get a line of their own under the Last.fm row;
+  - matching folds accents with `unicode-normalization` (already used by the
+    MusicBrainz lookup in the same crate).
+- **Client** (`crates/vcmp-integrations/src/lastfm/loves.rs`, `lastfm.rs`):
+  - `Client::love` and `Client::unlove` are signed POSTs like the scrobbles. An
+    empty 200 answer counts as success.
+  - `Client::loved_tracks(user, page)` reads 200 loved tracks a page. It is a
+    plain GET without a session key or signature, so the spec's open question
+    (whether a POST works) doesn't arise. `Transport` gained `get`.
+  - The parser takes numbers given as strings, a lone track sent as an object
+    instead of a list, a missing date, and an empty list (`totalPages` 0).
+  - `match_key` and `match_loved` do the matching: NFKD, combining marks dropped,
+    lowercase, runs of spaces made one. Every library track that matches is liked.
+- **Scrobbler thread** (`lastfm/scrobbler.rs`):
+  - A `LoveStore` trait sits beside `ScrobbleStore`.
+  - Loves go out one by one once the plays are out, with the same backoff. One
+    that Last.fm refuses is dropped; a revoked key keeps them; disconnecting
+    clears them and stops an import.
+  - The import reads one page each time round the loop, so plays, loves and the
+    other jobs keep going. A busy or unreachable page is tried three times.
+    After the last page the store likes the matches.
+  - New reports: `Loved`, `ImportProgress`, `Imported`, `ImportFailed`.
+- **Library** (`crates/vcmp-library/src/loves.rs`, `favourites.rs`, `schema.rs`):
+  - Schema version 14 adds `love_queue`, unique by artist and title.
+    `INSERT OR REPLACE` gives the newer entry a new id, so a love being sent as it
+    is replaced isn't mistaken for the unlove that replaced it.
+  - `like_at` likes tracks as of Last.fm's love dates and keeps earlier hearts.
+  - `track_names` lists id, artist and title, unavailable tracks included.
+- **App:**
+  - `Hearts::set` tells a `LoveSink` which tracks' hearts actually changed, and
+    `Hearts::refresh` shows likes made elsewhere.
+  - `LastfmService` is that sink, wired in `main.rs` with `attach`. It queues loves
+    only while connected with the switch on (`lastfm.love`, off by default).
+  - `QueueStore` implements `LoveStore`, the import's matching included.
+  - Settings: `LastfmLoveRow` (the switch) and `LastfmImportRow` (the button,
+    progress and result), both shown only while an account is connected. Every
+    string goes through `@tr()`.
+- **Tests:**
+  - `vcmp-integrations` (17 new): the love and unlove forms, the GET and its
+    parsing quirks, matching, the love queue's order, drop and backoff, a revoked
+    key, disconnecting, the import's paging, retries, giving up, and loves sent
+    while an import waits.
+  - `vcmp-library` (4 new): queue replacement and reopening, `like_at` keeping an
+    earlier heart, `track_names` with a missing file.
+  - `vcmp-app/tests/lastfm.rs` (7 new): the rows only while connected, the switch
+    gating loves (and remembered), like-then-unlike leaving only the unlove,
+    disconnecting, the import's progress, result and failure. One test runs the
+    real scrobbler against a scripted Last.fm and a real library, and checks that
+    case- and accent-different loves like both copies of a song with the love date.
+- **Docs:**
+  - `docs/ui.md` (Last.fm section, file table, known limits) and `docs/library.md`
+    (`love_queue`, the new reads).
+  - `docs/manual-testing.md` (love, offline loves, import).
+  - `README.md` (features) and `CLAUDE.md` (crate and stack tables).
+- **Checks, on Windows:** `cargo fmt --all --check` and `cargo clippy --workspace
+  --all-targets -- -D warnings` are clean. The Last.fm and favourites suites pass:
+  integrations `lastfm`, library `loves`, the library `favourites` test file and
+  the app's `lastfm` test file. The full `cargo test --workspace` was not run, at
+  your request: you will run it once the open sessions are merged.
+
+### How to test
+
+Use a build with the keys (`VCMP_LASTFM_API_KEY`, `VCMP_LASTFM_SHARED_SECRET`) and a
+throwaway `VCMP_HOME`. The steps are in `docs/manual-testing.md` (Online). In short:
+
+1. Connect an account. "Love on Last.fm" and "Import loved tracks from Last.fm"
+   appear under the Last.fm row.
+2. With the switch off, heart a track: nothing on last.fm. Switch it on and heart
+   another: it is loved on your profile. Take the heart away: it is unloved.
+3. Press Import: the row counts pages, then says how many tracks are in Favourites
+   and how many matched nothing. The hearts show at once.
+
+### What is missing
+
+- Nothing from the spec. Not yet seen against the real API: the love calls, and
+  whether `user.getLovedTracks` accepts 200 a page.
 
 ## Known problems
 
@@ -119,9 +198,18 @@ more tracks: `VCMP_HOME=target/fav cargo run -p vcmp-app`, then add a music fold
   failed once under the full workspace run (`engine/tests.rs:686`). It passed alone
   and in its own crate's run, so it looks timing-dependent under load.
 
+- **Last.fm (PR 2):**
+  - Matching is exact after folding: "feat." credits, punctuation and
+    "(Remastered)" make a loved track count as unmatched. The same song on two
+    albums is liked on both, as you decided.
+  - A love or import report that arrives just after disconnecting can still change
+    the row's numbers. The rows are hidden by then, and the next import resets
+    them.
+  - Imported likes count as old for "Forgotten favourites" at once, because they
+    keep Last.fm's dates (intended by the spec).
+
 ## Recommended follow-ups
 
-- PR 2 (Last.fm loves and import), as the spec plans, once this is merged.
 - Name the `favourites` context to agents too, so the MCP queue answer says what
   plays.
 - Look into the engine test that failed once under load, so the pre-merge run is
@@ -133,3 +221,7 @@ more tracks: `VCMP_HOME=target/fav cargo run -p vcmp-app`, then add a music fold
   track or album menu
 - Find your liked tracks in a Favourites playlist, first among your playlists,
   newest first, ready to play, shuffle or export
+- Turn on "Love on Last.fm" to love the tracks you heart on your Last.fm profile
+  too
+- Bring the tracks you loved on Last.fm into Favourites with "Import loved tracks
+  from Last.fm"
