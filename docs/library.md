@@ -37,7 +37,7 @@ path (see [Writing tags](#writing-tags)), and `Library::accept_change_set` (see
 
 ## Schema
 
-Version 13, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
+Version 14, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
 migrations; a database from a newer build is refused instead of being altered.
 Migrations run with foreign keys off (`Library::open` turns them on afterwards), so
 a migration that rebuilds a table, as version 12 rebuilds `change_sets` to widen
@@ -45,7 +45,7 @@ the CHECK on its kind, doesn't delete the rows that refer to it.
 
 | Table | Holds |
 |---|---|
-| `settings` | Key/value preferences: `library.auto_update`, `ui.theme` (the theme and accent as JSON; [ui.md](ui.md#themes)), `ui.reduced_motion` (`system`, `on` or `off`), `ui.setup_done` (the setup wizard was shown, or the library had folders when it came; [ui.md](ui.md#setup-wizard)) |
+| `settings` | Key/value preferences: `library.auto_update`, `ui.theme` (the theme and accent as JSON; [ui.md](ui.md#themes)), `ui.reduced_motion` (`system`, `on` or `off`), `ui.setup_done` (the setup wizard was shown, or the library had folders when it came; [ui.md](ui.md#setup-wizard)), `ui.lyrics_shown` and `integrations.lyrics_online` (see [Lyrics](#lyrics)) |
 | `source_dirs` | Source directories (canonical path) and their `recursive` flag |
 | `tracks` | One row per file ever seen: path, size, mtime, `available`, format, tags, duration |
 | `albums` | Album groups, their artist, year and artwork state, and whether the album is an artist's Unknown album (`unknown`, version 9) |
@@ -67,6 +67,7 @@ the CHECK on its kind, doesn't delete the rows that refer to it.
 | `track_labels` | Which track holds which label, and since when; deleting a label deletes its rows (version 12) |
 | `change_labels` | The labels a label set creates when accepted, and whether it did or found one of that name (version 12) |
 | `favourites` | The tracks the owner liked, one row each, and when (version 13; see [Favourites](#favourites)) |
+| `lyrics_lookups` | What LRCLIB answered for a track (LRC text, plain text, or nothing), the question it answered (title, artist, album, duration in seconds) and when, keyed by source and track id (`local` and the library track id) rather than a reference (version 14; see [Lyrics](#lyrics)) |
 
 Paths are stored as platform-native bytes (`src/path_codec.rs`), so file names that
 aren't valid UTF-8 keep working.
@@ -382,6 +383,47 @@ accepted.
   `Library::clear_fetched_cover` forgets it, together with the automatic lookup's
   result for the album, so that lookup may run again.
 
+## Lyrics
+
+`src/lyrics.rs` ([spec](specs/2026-11-07-lyrics-in-now-playing.md)). Lyrics are
+for the now playing view; nothing here writes a music file.
+
+- **Read when a track starts**, never at scan time (`read_local_lyrics`, called off
+  the UI thread by the app): the `.lrc` file of the same name (the track's path
+  with the extension `lrc` or `LRC`), and the tag VCMP reads. In ID3v2 (MP3, WAV):
+  SYLT frames timed in milliseconds (lofty keeps SYLT as binary data and parses it
+  on request) and USLT frames, those without a description first. In Vorbis
+  comments (FLAC, Ogg Vorbis): `LYRICS` and `UNSYNCEDLYRICS`. Plain lyrics are in
+  `track_tags` too, but the file is read again so one read always matches it.
+- **LRC** (`parse_lrc`): `[mm:ss]` to `[mm:ss.xxx]` stamps, several on one line
+  (the line repeats at each), `[offset:+/-ms]` (positive shows lines earlier),
+  other `[tag:value]` lines ignored, word stamps `<mm:ss.xx>` removed, and lines
+  without a stamp dropped. Text with at least one stamp counts as synced, wherever
+  it is: an `.lrc` file, USLT, `LYRICS`. A SYLT whose entries start new lines with a
+  line break and continue them without one (syllables) is joined into lines.
+- **`.lrc` files** are read up to 1 MiB, as UTF-8 (with or without a BOM), UTF-16
+  with a BOM, and otherwise Latin-1.
+- **Which lyrics show** (`choose_lyrics`): synced first, then plain, and within
+  each the `.lrc` file, then the tags, then LRCLIB. An `.lrc` file without stamps
+  is plain text and comes before the tags' plain text.
+- **LRCLIB** (`vcmp-integrations::lrclib`, behind "Find lyrics online",
+  `integrations.lyrics_online`, off unless set): asked only when nothing synced is
+  on disk and the track has an artist. Its exact `get` with the title, artist,
+  album (when there is one) and duration in whole seconds; LRCLIB matches the
+  duration within 2 s. A 404 or an instrumental record is "not found"; anything
+  else that isn't an answer is a failure, and a 429 waits at least for its
+  Retry-After. One request at a time, at least 300 ms apart; a lookup asked for
+  while another runs replaces any that waits.
+- **The cache** (`lyrics_lookups`, `Library::lyrics_lookup` and
+  `set_lyrics_lookup`): every answer, "not found" included, with the question it
+  answered. An answer counts only for that question, so a track whose title,
+  artist, album or duration changed (a tag edit, an agent's change, a rescan) is
+  looked up again (`lyrics_lookup_due`). "Not found" is asked again after 30 days
+  (`LYRICS_RETRY_NOT_FOUND`). Failures aren't stored; the app waits 10 minutes, or
+  the Retry-After, before asking again for that track. Rows are keyed by source
+  and id, so tracks of another source can use the table later; tracks are never
+  deleted, so rows are never orphaned.
+
 ## Animated pictures
 
 `src/animation.rs`. A GIF, an animated WebP or an APNG can be an album's cover, an
@@ -608,6 +650,10 @@ cargo run --release -p vcmp-library --example scan_profile -- /path/to/music
   tags (Windows Explorer reads RIFF INFO in WAV files) show them.
 - A comment or lyrics frame VCMP writes gets the unknown language `XXX`, whatever
   language the frame it replaces had.
+- Lyrics: a SYLT frame timed in MPEG frames is ignored, and an `.lrc` file in an
+  encoding other than UTF-8, UTF-16 with a BOM or Latin-1 (Windows-1250, GBK)
+  shows wrong characters. Lyrics in an MP3's APE or ID3v1 tag aren't read, and
+  lyrics can't be searched.
 - ID3v2 keeps a total only behind its number. A total for an MP3 or WAV file
   without the number, or clearing a movement number while its total stays, would
   read back as the number 0, so the read-back check refuses that file

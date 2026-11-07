@@ -32,6 +32,9 @@ A player for the music files on your own drives, for Windows 10 and newer and Li
   artist photos on fanart.tv. You can use your own pictures instead, and give
   playlists one too. An animated GIF, WebP or PNG plays on its album's, artist's or
   playlist's page.
+- Shows lyrics in the now playing view, from an `.lrc` file next to a song or from
+  its tags; synced lyrics follow the song, and a click on a line jumps there. If you
+  turn it on, lyrics are also looked up on LRCLIB.
 - Works with media keys and your system's media controls, shows what you play on
   Discord and scrobbles to Last.fm.
 - Has four themes (one light, three dark) with an accent colour to pick, reads

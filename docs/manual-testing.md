@@ -122,6 +122,44 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
       Linux with a sound server, sound returns to it within half a second
       **(never seen working with a real device)**; elsewhere, choose it again.
 
+### Lyrics
+
+Use copies of your music or a `VCMP_HOME` library; nothing is written to the files,
+but the `.lrc` files below are yours to add and remove.
+
+- [ ] Next to a copied FLAC, add `song.lrc` with timed lines (`[00:05.00]...`).
+      Play it: the player bar's lyrics button is enabled. Press it: now playing
+      opens on the lyrics, the line playing in the accent and kept in the middle;
+      lines change on the beat, not a quarter second late. Press it again: the view
+      closes.
+- [ ] Click a line: playback jumps to it. Tab to the lines, Up/Down moves a focus
+      ring, Enter plays from that line. Seek with the bar's slider and pause: the
+      highlight follows and stops.
+- [ ] Reduce motion on: the list jumps to each new line instead of gliding.
+- [ ] Turn the view's lyrics button off, close and reopen now playing, restart VCMP:
+      the view stays on the cover. Turn it on: it stays on the lyrics for every
+      track that has lyrics; a track without any shows the cover and no button, and
+      the bar's button is greyed.
+- [ ] An MP3 with SYLT (synced) lyrics from a tagger (Mp3tag, foobar2000,
+      MusicBrainz Picard with a lyrics plugin), and one with USLT holding LRC text:
+      both show synced. A file with plain USLT or `LYRICS`: the text scrolls, with
+      Up/Down and Page Up/Down from the keyboard too.
+- [ ] An `.lrc` saved as UTF-8 with accents and one as UTF-16 (Notepad's
+      "UTF-16 LE"): both read correctly.
+- [ ] Settings and the setup wizard's Online services step both have "Find lyrics
+      online". With it off, nothing reaches lrclib.net (watch with a proxy or the
+      log at `RUST_LOG=info`).
+- [ ] With it on, play a well-known track without lyrics on disk: synced lyrics
+      appear a moment after it starts, and the view switches to them if it was
+      open on lyrics. Play it again offline: they are still there.
+- [ ] A track LRCLIB doesn't know: no lyrics, and playing it again doesn't ask
+      again (log). Edit its title in the tag editor to the right one: it is asked
+      again and the lyrics appear. **(never seen working with real tracks)**
+- [ ] A track with plain lyrics in its tags and "Find lyrics online" on: the plain
+      text shows at once and gives way to LRCLIB's synced lyrics when they come.
+- [ ] Player bar at 720 px wide (and at 800 px): all buttons, the volume slider and
+      the track's title fit without overlapping.
+
 ### Selecting and playing tracks
 
 - [ ] A click selects a track and plays nothing. Under the pointer the track's

@@ -18,7 +18,7 @@ DESIGN.md).
 | `ui/components.slint` | `FocusRing`, `MenuHost` (see "Menus over lists"), `ScrollArea` (every scrolling part but the album grid and the songs table, without a scroll bar), `EdgeScroll`, `NavItem`, `PlaylistLink`, `SegmentedChoice`, `Toggle`, `SettingRow`, `Button`, `IconButton`, `Dropdown`, `SearchField`, `TextField`, `ProgressBar`, `Modal` (the dialog frame of the tag editor, the pickers, the confirmation and the setup wizard) |
 | `ui/setup.slint` | `Setup` global and `SetupWizard`: the first-run setup wizard (see "Setup wizard") |
 | `src/setup.rs` | Whether the wizard opens at the start, and its `ui.setup_done` flag |
-| `ui/setting-rows.slint` | `DiscordRow`, `ZoomRow`, `MotionRow`: Settings rows the setup wizard shows too |
+| `ui/setting-rows.slint` | `DiscordRow`, `LyricsOnlineRow`, `ZoomRow`, `MotionRow`: Settings rows the setup wizard shows too |
 | `ui/themes.slint` | `Themes` global, `ThemeWords` and `ThemeRows`: the theme tiles, the accent dots and the theme file buttons, notes and contrast warning (see "Themes") |
 | `ui/confirmation.slint` | `Confirmation` global and `ConfirmDialog`: the "are you sure?" before deleting a playlist, a label or the agents' backups |
 | `ui/icons.slint` | The `Glyph` names, the `IconArt` global and `Icon` |
@@ -48,13 +48,15 @@ DESIGN.md).
 | `ui/library-state.slint` | `LibraryState` global: music folders, scan progress and results |
 | `ui/library-settings.slint` | The Music folders section of Settings, shown in the setup wizard too |
 | `src/library_service.rs` | `LibraryService`: folders, background scans, automatic updates |
-| `ui/player-state.slint` | `PlayerState` global: the current track, position, volume, shuffle, repeat |
+| `ui/player-state.slint` | `PlayerState` global: the current track, position, volume, shuffle, repeat, lyrics |
 | `ui/player-bar.slint` | `PlayerBar`, its play button and the `Slider` |
-| `ui/now-playing.slint` | `NowPlayingView`: the playing track's large cover and details over the pages |
+| `ui/now-playing.slint` | `NowPlayingView`: the playing track's large cover and details over the pages, or its lyrics |
+| `ui/lyrics.slint` | `LyricsView`: synced lyrics following the line playing, or plain lyrics, in the now playing view |
 | `ui/queue-panel.slint` | `QueuePanel`: the track playing, Up next and what follows |
 | `ui/icons/*.svg` | The control icons, painted in `currentColor` |
 | `src/icons.rs` | `IconArt`: writes the tint into an icon's SVG and keeps the result |
 | `src/player_service.rs` | `PlayerService`: commands to the playback engine, its events into `PlayerState` |
+| `src/player_service/lyrics.rs` | The playing track's lyrics: read off the UI thread, LRCLIB asked through the cache, the line playing timed from the positions |
 | `src/saved_queue.rs` | The queue kept across restarts, as versioned JSON in the settings |
 | `ui/lastfm-state.slint` | `LastfmState` global: whether the build has Last.fm, the account, connecting, and what went wrong |
 | `ui/lastfm-settings.slint` | `LastfmRow`: the Last.fm setting and its Connect, Cancel or Disconnect button |
@@ -200,7 +202,8 @@ border, so the dialog's text keeps base's contrast.
 | Red only for errors, with words | The owner's choice (2026-10-18): pink means active, so a wrong value marked in pink read as selected. The red label is bold and the sentence under the form names the field, so the colour never carries the message alone |
 | Sora for everything, two weights (400, 600) | The owner's choice; two weights carry hierarchy without a second family at ENERGY 1 |
 | Type scale 12 / 14 / 16 / 20 / 26 px, and 34 px for the track in the now playing view (42 px when the view is wider than 1800 px) and for the title of an album, artist or playlist page | Small steps suit a calm UI; the page title is the one large element per screen, and the now playing view's and a detail page's titles take its place there, a step larger next to the large cover. A detail page's artist line is 20 px and its counts 14 px, so the header reads at a glance beside its cover (the owner's request, 2026-10-28) |
-| Now playing covers the pages, not the player bar | The bar already holds every control, so the view needs none of its own and the controls stay where people know them |
+| Now playing covers the pages, not the player bar | The bar already holds every control, so the view needs none of its own and the controls stay where people know them. The one exception is the lyrics toggle, which switches what the view itself shows ([lyrics spec](specs/2026-11-07-lyrics-in-now-playing.md)) |
+| Lyrics take the cover's place in now playing, behind a toggle that is remembered; the player bar has a lyrics button too, always there and disabled while the track has none | The owner's choices (2026-11-07): one arrangement for wide and narrow windows with the most room for the lines, a view that looks as before for tracks without lyrics, one click from anywhere, and a bar whose buttons never move between tracks. The line playing is in the accent, whose job is "what plays now" |
 | Titles, artists and albums of the playing track are links, underlined on hover | People expect to go from what plays to where it comes from; the underline marks a link without adding colour |
 | Spacing scale 4 / 8 / 12 / 16 / 24 / 40 px | Bigger gaps separate sections, small ones group a label with its description |
 | Radii 2 / 8 / 12 px; round (half the element's size) for icon-only buttons, the play button, progress and slider tracks, the slider knob and drop lines; the switch is a pill | Circles and round-ended tracks are what those controls are; everything else uses the three radii. `tests/ui_invariants.rs` refuses a radius written in bare pixels |
@@ -750,7 +753,28 @@ field (see [Labels](#labels)).
   is dropped.
 - **An animated cover** plays here too, at up to 1200 px (see
   [Animated pictures](#animated-pictures)).
-- Lyrics would go here later.
+- **Lyrics** ([spec](specs/2026-11-07-lyrics-in-now-playing.md)): for a track
+  with lyrics, a lyrics button beside the track's menu (top right) switches the view
+  to them and back; the choice is saved (`ui.lyrics_shown`) and applies to every
+  track that has lyrics. In lyrics mode the cover goes small (80 px) beside the
+  title, artist and album, without the next track, and the lyrics take the rest of
+  the view, at most 720 px wide, in wide and narrow windows alike. A track without
+  lyrics shows the view as before, without the button. Lyrics that arrive a moment
+  after the track started (an LRCLIB answer) switch the open view when they land.
+  - **Synced lyrics** (`LyricsView`, `ui/lyrics.slint`): one line per row, the line
+    playing in the accent and bold, the others muted. The line playing is kept in
+    the middle: the list glides there a third of the way each 16 ms, as the mouse
+    wheel does, or jumps with reduced motion on. A click on a line plays from its
+    start. The lines are one tab stop: Up/Down, Page Up/Down (five lines),
+    Home/End move the keyboard's line, Enter or Space plays from it.
+  - **Plain lyrics** are one text that scrolls; Up/Down, Page Up/Down and Home/End
+    scroll it from the keyboard.
+  - **Where the line comes from:** `src/player_service/lyrics.rs` takes the
+    engine's position (every 250 ms) and, between positions, the time since, and
+    starts a timer for the moment the next line begins, so lines change on time
+    rather than up to 250 ms late. A seek or pause starts again from the next
+    position. Where the lyrics come from is in
+    [docs/library.md](library.md#lyrics).
 
 ## Animated pictures
 
@@ -834,6 +858,10 @@ The Albums page tells apart why it is empty:
     Last.fm will count, which changes to a tick once it has (`PlayerState.scrobble`,
     set from the same `lastfm::Play` that hands the scrobble over). Pointing at a
     mark shows its name above it;
+  - lyrics, now playing and the queue, three switches. The lyrics button opens now
+    playing on the lyrics (and turns the view's lyrics toggle on), switches an open
+    view to them, or closes a view that shows them. It is disabled while the track
+    has no lyrics, and in the accent while the view shows them;
   - the sleep timer, a moon next to the queue button. Its menu offers "End of this
     track" and 15, 30, 45, 60 and 90 minutes, plus "Turn off sleep timer" while one
     is on. While it is on the moon is in the accent; while it counts down, the minutes
@@ -844,9 +872,11 @@ The Albums page tells apart why it is empty:
     stopping by itself, ends a running one. It counts in whole minutes on a Slint
     timer and isn't saved.
 - **Width at 720 px** (at 100 % zoom): the bar's three parts have fixed minimums: 136 px for the
-  track, 240 px for the controls and 256 px for the buttons and volume. With its
-  padding and gaps that is exactly 720 px; another button on the right needs room
-  taken elsewhere (`smallest_window_keeps_everything_inside` checks it).
+  track, 240 px for the controls and 272 px for the buttons and volume (five 40 px
+  buttons, 4 px apart, and a volume slider of at least 52 px). Below 800 px the gaps
+  between the parts narrow from 24 to 16 px and those between the buttons from 8 to
+  4 px; with the padding that is exactly 720 px. Another button on the right needs
+  room taken elsewhere (`smallest_window_keeps_everything_inside` checks it).
 - **Seeking** moves the bar to the new position at once. Positions the engine sent
   before it took the seek are ignored for up to a second, so the bar doesn't jump
   back.
@@ -1057,7 +1087,7 @@ global. The player bar stays usable, as with the other dialogs.
   with `VCMP_SETUP=skip` (which writes nothing), it doesn't open. After that only
   "Run setup again", the first row of Settings, opens it.
 - **Steps:** Welcome, Music folders (`LibrarySection` without its heading), Look
-  (the built-in themes and the accent, without theme files; zoom; reduce motion), Online services (Show on Discord, Last.fm, the
+  (the built-in themes and the accent, without theme files; zoom; reduce motion), Online services (Show on Discord, Find lyrics online, Last.fm, the
   update check, the fanart.tv key, each only in builds that have it, and the AI
   agents switch), Done (the scan's state and where everything is). The rows are
   Settings' own components on the same globals, so every choice applies and saves
