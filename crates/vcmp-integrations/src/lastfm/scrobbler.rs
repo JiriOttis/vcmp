@@ -1,18 +1,30 @@
 //! The scrobbler thread: connecting an account, keeping its session key in the
-//! keyring, "now playing" updates, and sending the queued plays.
+//! keyring, "now playing" updates, sending the queued plays and loves, and reading
+//! the account's loved tracks for an import.
 //!
 //! Plays wait in a [`ScrobbleStore`] until Last.fm has them. They go out in batches
 //! of up to 50 whenever there is an account, and after a failure (offline, Last.fm
 //! busy) the scrobbler waits before the next try, twice as long each time up to
 //! half an hour. A "now playing" update that goes through ends the wait early: the
-//! network is back.
+//! network is back. Loves and unloves wait in a [`LoveStore`] and go out one by one
+//! after the plays, with the same wait.
+//!
+//! An import reads one page of loved tracks each time round, so plays, loves and
+//! the other jobs are not held up while a long list comes in. Once every page is
+//! read, the store likes the library tracks that match.
 
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::{Client, Error, MAX_BATCH, Remedy, Scrobble, Session, Track, Transport};
+use super::{
+    Client, Error, Imported, Love, Loved, MAX_BATCH, Remedy, Scrobble, Session, Track, Transport,
+};
+
+/// How often reading a page of loved tracks is tried while Last.fm is busy or
+/// unreachable, before the import gives up.
+const IMPORT_TRIES: u32 = 3;
 
 /// Where session keys are kept, by user name: the OS keyring, or a map in tests.
 pub trait SessionStore: Send + 'static {
@@ -65,6 +77,18 @@ pub trait ScrobbleStore: Send + 'static {
     fn clear(&mut self) -> Result<(), String>;
 }
 
+/// Loves and unloves not sent yet, and the library an import likes tracks in: the
+/// library database, or lists in tests.
+pub trait LoveStore: Send + 'static {
+    /// The oldest `limit` loves and unloves, oldest first, with the ids
+    /// `remove_loves` takes.
+    fn oldest_loves(&mut self, limit: usize) -> Result<Vec<(i64, Love)>, String>;
+    fn remove_loves(&mut self, ids: &[i64]) -> Result<(), String>;
+    fn clear_loves(&mut self) -> Result<(), String>;
+    /// Likes the library tracks that match `loved`, without queueing loves for them.
+    fn like_loved(&mut self, loved: &[Loved]) -> Result<Imported, String>;
+}
+
 /// How long the scrobbler waits for things; tests shorten them.
 #[derive(Clone, Copy, Debug)]
 pub struct Timing {
@@ -109,6 +133,26 @@ pub enum Report {
     Rejected,
     /// Last.fm has these plays now (it may have ignored some); they left the queue.
     Sent(usize),
+    /// Last.fm has these loves and unloves now, or refused them; they left the queue.
+    Loved(usize),
+    /// An import has read `page` of `pages` pages of loved tracks.
+    ImportProgress {
+        page: u32,
+        pages: u32,
+    },
+    /// An import is done.
+    Imported(Imported),
+    ImportFailed(ImportError),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImportError {
+    /// No account is connected, so there are no loved tracks to read.
+    NoAccount,
+    /// Last.fm refused, or could not be reached.
+    Lastfm(Error),
+    /// The library could not like the tracks.
+    Library(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -126,6 +170,8 @@ enum Job {
     Disconnect,
     NowPlaying(Track),
     Flush,
+    Loves,
+    Import,
 }
 
 /// Runs the scrobbler thread. Dropping it ends the thread once the request in
@@ -138,7 +184,7 @@ impl Scrobbler {
     pub fn start<T: Transport>(
         client: Client<T>,
         sessions: impl SessionStore,
-        queue: impl ScrobbleStore,
+        queue: impl ScrobbleStore + LoveStore,
         timing: Timing,
         on_report: impl Fn(Report) + Send + 'static,
     ) -> Self {
@@ -152,6 +198,8 @@ impl Scrobbler {
             account: None,
             waiting: None,
             unsent: false,
+            unloved: false,
+            import: None,
             retry_at: None,
             backoff: timing.backoff,
             batch: MAX_BATCH,
@@ -194,6 +242,18 @@ impl Scrobbler {
         self.send(Job::Flush);
     }
 
+    /// Loves or unloves were added to the queue.
+    pub fn flush_loves(&self) {
+        self.send(Job::Loves);
+    }
+
+    /// Reads the connected account's loved tracks and likes the library tracks that
+    /// match: [`Report::ImportProgress`] for each page, then [`Report::Imported`] or
+    /// [`Report::ImportFailed`]. Asked again while one runs, that one goes on.
+    pub fn import_loved(&self) {
+        self.send(Job::Import);
+    }
+
     fn send(&self, job: Job) {
         let _ = self.jobs.send(job);
     }
@@ -203,6 +263,18 @@ struct Waiting {
     token: String,
     next_poll: Instant,
     until: Instant,
+}
+
+/// An import under way.
+struct Import {
+    user: String,
+    // The page to read next, and how many there are as far as is known.
+    next_page: u32,
+    pages: u32,
+    loved: Vec<Loved>,
+    // Failed tries of this page, and when to read it.
+    tries: u32,
+    at: Instant,
 }
 
 struct Worker<T, S, Q> {
@@ -216,6 +288,9 @@ struct Worker<T, S, Q> {
     waiting: Option<Waiting>,
     // The queue may hold plays; false once it was found empty.
     unsent: bool,
+    // The same for loves.
+    unloved: bool,
+    import: Option<Import>,
     // After a failed send: when to try again, and the wait after the next failure.
     retry_at: Option<Instant>,
     backoff: Duration,
@@ -223,7 +298,7 @@ struct Worker<T, S, Q> {
     batch: usize,
 }
 
-impl<T: Transport, S: SessionStore, Q: ScrobbleStore> Worker<T, S, Q> {
+impl<T: Transport, S: SessionStore, Q: ScrobbleStore + LoveStore> Worker<T, S, Q> {
     fn run(&mut self, inbox: Receiver<Job>) {
         loop {
             let job = match self.next_wake() {
@@ -237,14 +312,17 @@ impl<T: Transport, S: SessionStore, Q: ScrobbleStore> Worker<T, S, Q> {
             }
             self.poll();
             self.send_queue();
+            self.send_loves();
+            self.import_page();
         }
     }
 
     fn next_wake(&self) -> Option<Instant> {
         let poll = self.waiting.as_ref().map(|waiting| waiting.next_poll);
-        let send = (self.unsent && self.account.is_some())
+        let send = ((self.unsent || self.unloved) && self.account.is_some())
             .then(|| self.retry_at.unwrap_or_else(Instant::now));
-        poll.into_iter().chain(send).min()
+        let import = self.import.as_ref().map(|import| import.at);
+        poll.into_iter().chain(send).chain(import).min()
     }
 
     fn handle(&mut self, job: Job) {
@@ -253,6 +331,7 @@ impl<T: Transport, S: SessionStore, Q: ScrobbleStore> Worker<T, S, Q> {
                 Ok(Some(key)) => {
                     self.account = Some(Session { user, key });
                     self.unsent = true;
+                    self.unloved = true;
                 }
                 Ok(None) => (self.report)(Report::KeyMissing),
                 Err(error) => (self.report)(Report::KeyUnreadable(error)),
@@ -280,7 +359,12 @@ impl<T: Transport, S: SessionStore, Q: ScrobbleStore> Worker<T, S, Q> {
                 if let Err(error) = self.queue.clear() {
                     log::warn!("could not empty the scrobble queue: {error}");
                 }
+                if let Err(error) = self.queue.clear_loves() {
+                    log::warn!("could not empty the love queue: {error}");
+                }
                 self.unsent = false;
+                self.unloved = false;
+                self.import = None;
                 self.retry_at = None;
                 self.backoff = self.timing.backoff;
             }
@@ -296,6 +380,25 @@ impl<T: Transport, S: SessionStore, Q: ScrobbleStore> Worker<T, S, Q> {
                 }
             }
             Job::Flush => self.unsent = true,
+            Job::Loves => self.unloved = true,
+            Job::Import => {
+                if self.import.is_some() {
+                    return;
+                }
+                match &self.account {
+                    Some(account) => {
+                        self.import = Some(Import {
+                            user: account.user.clone(),
+                            next_page: 1,
+                            pages: 1,
+                            loved: Vec::new(),
+                            tries: 0,
+                            at: Instant::now(),
+                        });
+                    }
+                    None => (self.report)(Report::ImportFailed(ImportError::NoAccount)),
+                }
+            }
         }
     }
 
@@ -324,6 +427,7 @@ impl<T: Transport, S: SessionStore, Q: ScrobbleStore> Worker<T, S, Q> {
                 });
                 self.account = Some(session);
                 self.unsent = true;
+                self.unloved = true;
                 return;
             }
             Err(error) if error.is_expired_token() => ConnectError::TimedOut,
@@ -405,6 +509,120 @@ impl<T: Transport, S: SessionStore, Q: ScrobbleStore> Worker<T, S, Q> {
         }
     }
 
+    /// Sends the queued loves and unloves one by one, once the plays are out.
+    fn send_loves(&mut self) {
+        while self.unloved && !self.unsent {
+            let Some(account) = &self.account else {
+                return;
+            };
+            if self.retry_at.is_some_and(|at| Instant::now() < at) {
+                return;
+            }
+            let (id, love) = match self.queue.oldest_loves(1) {
+                Ok(mut loves) if !loves.is_empty() => loves.remove(0),
+                Ok(_) => {
+                    self.unloved = false;
+                    return;
+                }
+                Err(error) => {
+                    log::warn!("could not read the love queue: {error}");
+                    self.wait();
+                    return;
+                }
+            };
+            let sent = if love.love {
+                self.client.love(&account.key, &love.artist, &love.title)
+            } else {
+                self.client.unlove(&account.key, &love.artist, &love.title)
+            };
+            match sent {
+                Ok(()) => {
+                    self.retry_at = None;
+                    self.backoff = self.timing.backoff;
+                    self.loves_taken(id);
+                }
+                Err(error) => match error.remedy() {
+                    Remedy::RetryLater => {
+                        log::info!("sending a love failed, trying again later: {error}");
+                        self.wait();
+                        return;
+                    }
+                    Remedy::Reconnect => {
+                        self.rejected();
+                        return;
+                    }
+                    Remedy::NewKey => {
+                        log::error!("Last.fm refuses VCMP's API key: {error}");
+                        self.retry_at = Some(Instant::now() + self.timing.max_backoff);
+                        return;
+                    }
+                    Remedy::Drop => {
+                        log::warn!("Last.fm refused a love, dropping it: {error}");
+                        self.loves_taken(id);
+                    }
+                },
+            }
+        }
+    }
+
+    fn loves_taken(&mut self, id: i64) {
+        match self.queue.remove_loves(&[id]) {
+            Ok(()) => (self.report)(Report::Loved(1)),
+            Err(error) => {
+                log::warn!("could not take a sent love out of the queue: {error}");
+                self.wait();
+            }
+        }
+    }
+
+    /// Reads the next page of loved tracks for the import under way, when it is time
+    /// to; after the last page, likes the matching tracks.
+    fn import_page(&mut self) {
+        let Some(import) = &mut self.import else {
+            return;
+        };
+        let now = Instant::now();
+        if now < import.at {
+            return;
+        }
+        let failure = match self.client.loved_tracks(&import.user, import.next_page) {
+            Ok(page) => {
+                import.loved.extend(page.tracks);
+                import.pages = page.pages;
+                import.tries = 0;
+                (self.report)(Report::ImportProgress {
+                    page: import.next_page.min(import.pages),
+                    pages: import.pages,
+                });
+                if import.next_page < import.pages {
+                    import.next_page += 1;
+                    return;
+                }
+                None
+            }
+            Err(error)
+                if error.remedy() == Remedy::RetryLater && import.tries + 1 < IMPORT_TRIES =>
+            {
+                log::info!("reading loved tracks failed, trying again: {error}");
+                import.tries += 1;
+                import.at = now + self.timing.backoff * 2u32.pow(import.tries - 1);
+                return;
+            }
+            Err(error) => Some(error),
+        };
+        let Some(import) = self.import.take() else {
+            return;
+        };
+        let report = match failure {
+            Some(error) => Report::ImportFailed(ImportError::Lastfm(error)),
+            None => match self.queue.like_loved(&import.loved) {
+                Ok(imported) => Report::Imported(imported),
+                Err(error) => Report::ImportFailed(ImportError::Library(error)),
+            },
+        };
+        (self.report)(report);
+    }
+
     /// Plays Last.fm is done with leave the queue.
     fn taken(&mut self, ids: &[i64]) {
         match self.queue.remove(ids) {
@@ -459,9 +677,16 @@ mod tests {
     use super::super::tests::{Requests, Scripted, api_error, credentials, ok, track, value};
     use super::*;
 
-    /// Plays in memory, shared with the test.
+    /// Plays and loves in memory, shared with the test.
     #[derive(Clone, Default)]
-    struct Plays(Arc<Mutex<Vec<(i64, Scrobble)>>>);
+    struct Plays(Arc<Mutex<Vec<(i64, Scrobble)>>>, Arc<Mutex<Loves>>);
+
+    #[derive(Default)]
+    struct Loves {
+        queue: Vec<(i64, Love)>,
+        // What imports asked to like.
+        imported: Vec<Loved>,
+    }
 
     impl Plays {
         fn with(count: usize) -> Self {
@@ -501,6 +726,69 @@ mod tests {
         fn clear(&mut self) -> Result<(), String> {
             self.0.lock().unwrap().clear();
             Ok(())
+        }
+    }
+
+    impl Plays {
+        fn love(&self, title: &str, love: bool) {
+            let mut loves = self.1.lock().unwrap();
+            let id = loves.queue.len() as i64 + 1;
+            loves.queue.push((
+                id,
+                Love {
+                    artist: "Band".into(),
+                    title: title.into(),
+                    love,
+                },
+            ));
+        }
+
+        fn loves_left(&self) -> usize {
+            self.1.lock().unwrap().queue.len()
+        }
+
+        fn imported(&self) -> Vec<String> {
+            let loves = self.1.lock().unwrap();
+            loves
+                .imported
+                .iter()
+                .map(|loved| loved.title.clone())
+                .collect()
+        }
+    }
+
+    impl LoveStore for Plays {
+        fn oldest_loves(&mut self, limit: usize) -> Result<Vec<(i64, Love)>, String> {
+            let loves = self.1.lock().unwrap();
+            Ok(loves.queue.iter().take(limit).cloned().collect())
+        }
+
+        fn remove_loves(&mut self, ids: &[i64]) -> Result<(), String> {
+            self.1
+                .lock()
+                .unwrap()
+                .queue
+                .retain(|(id, _)| !ids.contains(id));
+            Ok(())
+        }
+
+        fn clear_loves(&mut self) -> Result<(), String> {
+            self.1.lock().unwrap().queue.clear();
+            Ok(())
+        }
+
+        /// Every loved track "matches", but one titled "Nowhere".
+        fn like_loved(&mut self, loved: &[Loved]) -> Result<Imported, String> {
+            let mut loves = self.1.lock().unwrap();
+            loves.imported.extend_from_slice(loved);
+            let unmatched = loved
+                .iter()
+                .filter(|loved| loved.title == "Nowhere")
+                .count();
+            Ok(Imported {
+                matched: loved.len() - unmatched,
+                unmatched,
+            })
         }
     }
 
@@ -885,5 +1173,209 @@ mod tests {
         assert_eq!(running.next(), Report::Sent(1));
         let requests = running.requests.lock().unwrap();
         assert_eq!(value(&requests[0], "timestamp[0]"), Some("1234567890"));
+    }
+
+    fn loved_page(page: u32, pages: u32, titles: &[&str]) -> Result<(u16, String), String> {
+        let tracks: Vec<String> = titles
+            .iter()
+            .map(|title| {
+                format!(r#"{{"name":"{title}","artist":{{"name":"Band"}},"date":{{"uts":"100"}}}}"#)
+            })
+            .collect();
+        ok(&format!(
+            r#"{{"lovedtracks":{{"track":[{}],"@attr":{{"page":"{page}","totalPages":"{pages}"}}}}}}"#,
+            tracks.join(",")
+        ))
+    }
+
+    #[test]
+    fn loves_go_out_one_by_one_after_the_plays() {
+        let plays = Plays::with(1);
+        plays.love("Opening", true);
+        plays.love("Closing", false);
+        let running = start([accepted(1), ok("{}"), ok("{}")], plays.clone(), QUICK);
+        running.store_key();
+        running.scrobbler.resume("listener");
+        assert_eq!(running.next(), Report::Sent(1));
+        assert_eq!(running.next(), Report::Loved(1));
+        assert_eq!(running.next(), Report::Loved(1));
+        assert_eq!(
+            running.methods(),
+            ["track.scrobble", "track.love", "track.unlove"]
+        );
+        let requests = running.requests.lock().unwrap();
+        assert_eq!(value(&requests[1], "track"), Some("Opening"));
+        assert_eq!(value(&requests[2], "track"), Some("Closing"));
+        assert_eq!(value(&requests[2], "sk"), Some("sk-1"));
+        assert_eq!(plays.loves_left(), 0);
+    }
+
+    #[test]
+    fn a_love_queued_later_is_sent_on_flush() {
+        let plays = Plays::default();
+        let running = start([ok("{}")], plays.clone(), QUICK);
+        running.store_key();
+        running.scrobbler.resume("listener");
+        running.settle();
+        plays.love("Opening", true);
+        running.scrobbler.flush_loves();
+        assert_eq!(running.next(), Report::Loved(1));
+        assert_eq!(running.methods(), ["track.love"]);
+    }
+
+    #[test]
+    fn a_love_last_fm_refuses_is_dropped_and_an_offline_one_waits() {
+        let plays = Plays::default();
+        plays.love("Refused", true);
+        plays.love("Later", true);
+        let running = start(
+            [api_error(6), Err("offline".into()), ok("{}")],
+            plays.clone(),
+            QUICK,
+        );
+        running.store_key();
+        let begun = Instant::now();
+        running.scrobbler.resume("listener");
+        assert_eq!(running.next(), Report::Loved(1));
+        let (report, at) = running.next_at();
+        assert_eq!(report, Report::Loved(1));
+        assert!(at - begun >= QUICK.backoff, "{:?}", at - begun);
+        assert_eq!(running.methods(), ["track.love"; 3]);
+        assert_eq!(plays.loves_left(), 0);
+    }
+
+    #[test]
+    fn a_revoked_key_keeps_the_loves() {
+        let plays = Plays::default();
+        plays.love("Opening", true);
+        let running = start([api_error(9)], plays.clone(), QUICK);
+        running.store_key();
+        running.scrobbler.resume("listener");
+        assert_eq!(running.next(), Report::Rejected);
+        assert_eq!(plays.loves_left(), 1);
+    }
+
+    #[test]
+    fn disconnecting_forgets_the_loves() {
+        let plays = Plays::default();
+        let running = start([], plays.clone(), QUICK);
+        plays.love("Opening", true);
+        running.scrobbler.disconnect();
+        running.settle();
+        assert_eq!(plays.loves_left(), 0);
+    }
+
+    #[test]
+    fn an_import_reads_every_page_then_likes_the_matches() {
+        let plays = Plays::default();
+        let running = start(
+            [
+                loved_page(1, 2, &["One", "Two"]),
+                loved_page(2, 2, &["Nowhere"]),
+            ],
+            plays.clone(),
+            QUICK,
+        );
+        running.store_key();
+        running.scrobbler.resume("listener");
+        running.scrobbler.import_loved();
+        assert_eq!(running.next(), Report::ImportProgress { page: 1, pages: 2 });
+        assert_eq!(running.next(), Report::ImportProgress { page: 2, pages: 2 });
+        assert_eq!(
+            running.next(),
+            Report::Imported(Imported {
+                matched: 2,
+                unmatched: 1
+            })
+        );
+        assert_eq!(plays.imported(), ["One", "Two", "Nowhere"]);
+        let requests = running.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        for (index, form) in requests.iter().enumerate() {
+            assert_eq!(value(form, "method"), Some("user.getLovedTracks"));
+            assert_eq!(value(form, "user"), Some("listener"));
+            assert_eq!(value(form, "page"), Some((index + 1).to_string().as_str()));
+        }
+    }
+
+    #[test]
+    fn an_empty_loved_list_imports_nothing() {
+        let plays = Plays::default();
+        let running = start([loved_page(1, 0, &[])], plays.clone(), QUICK);
+        running.store_key();
+        running.scrobbler.resume("listener");
+        running.scrobbler.import_loved();
+        assert_eq!(running.next(), Report::ImportProgress { page: 1, pages: 1 });
+        assert_eq!(running.next(), Report::Imported(Imported::default()));
+    }
+
+    #[test]
+    fn an_import_needs_an_account() {
+        let running = start([], Plays::default(), QUICK);
+        running.scrobbler.import_loved();
+        assert_eq!(running.next(), Report::ImportFailed(ImportError::NoAccount));
+    }
+
+    #[test]
+    fn an_import_tries_a_busy_page_again_then_gives_up() {
+        let plays = Plays::default();
+        let running = start(
+            [
+                Err("offline".into()),
+                loved_page(1, 2, &["One"]),
+                api_error(29),
+                api_error(29),
+                api_error(29),
+            ],
+            plays.clone(),
+            QUICK,
+        );
+        running.store_key();
+        running.scrobbler.resume("listener");
+        running.scrobbler.import_loved();
+        assert_eq!(running.next(), Report::ImportProgress { page: 1, pages: 2 });
+        assert!(matches!(
+            running.next(),
+            Report::ImportFailed(ImportError::Lastfm(Error::Api { code: 29, .. }))
+        ));
+        assert!(plays.imported().is_empty(), "nothing is liked from a part");
+        assert_eq!(running.methods(), ["user.getLovedTracks"; 5]);
+    }
+
+    #[test]
+    fn loves_go_out_while_an_import_waits_for_a_page() {
+        let plays = Plays::default();
+        let running = start(
+            [
+                Err("offline".into()),
+                ok("{}"),
+                loved_page(1, 2, &["One"]),
+                loved_page(2, 2, &["Two"]),
+            ],
+            plays.clone(),
+            Timing {
+                backoff: Duration::from_millis(200),
+                ..QUICK
+            },
+        );
+        running.store_key();
+        running.scrobbler.resume("listener");
+        running.scrobbler.import_loved();
+        running.requested(1);
+        plays.love("Opening", true);
+        running.scrobbler.flush_loves();
+        assert_eq!(running.next(), Report::Loved(1));
+        assert_eq!(running.next(), Report::ImportProgress { page: 1, pages: 2 });
+        assert_eq!(running.next(), Report::ImportProgress { page: 2, pages: 2 });
+        assert!(matches!(running.next(), Report::Imported(_)));
+        assert_eq!(
+            running.methods(),
+            [
+                "user.getLovedTracks",
+                "track.love",
+                "user.getLovedTracks",
+                "user.getLovedTracks"
+            ]
+        );
     }
 }

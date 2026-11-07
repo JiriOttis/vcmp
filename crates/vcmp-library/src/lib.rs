@@ -1,10 +1,11 @@
 //! Music library: source directories, scanning, tag reading, the SQLite database and
-//! artwork caching, and playlists written out as M3U files. Must not depend on the UI
-//! crate.
+//! artwork caching, and playlists written to and read from M3U files. Must not depend
+//! on the UI crate.
 //!
 //! The database is a cache of the files' tags (the files are the source of truth) plus
-//! what only VCMP knows: source directories, settings, labels, favourites, the plays
-//! waiting for Last.fm and the change sets AI agents asked for. Music files are written only by
+//! what only VCMP knows: source directories, settings, labels, favourites, the play
+//! history, the plays waiting for Last.fm, the change sets AI agents asked for and the
+//! duplicate groups the owner marked "Not duplicates". Music files are written only by
 //! [`Library::write_tags`] and [`Library::accept_change_set`], through a verified
 //! copy.
 
@@ -12,15 +13,19 @@ pub mod animation;
 mod artist_photos;
 mod artwork;
 mod changes;
+mod check;
 mod edit;
 mod error;
 mod favourites;
 mod labels;
 mod lookups;
+mod loves;
+mod lyrics;
 mod m3u;
 mod other_tags;
 mod path_codec;
 mod playlists;
+mod plays;
 mod query;
 mod scan;
 mod schema;
@@ -38,13 +43,21 @@ pub use changes::{
     CHANGE_SETS_KEPT, ChangeKind, ChangeSet, ChangeSetId, ChangeSetSummary, ChangeStatus,
     ChangedFile, FileResult, LabelEdit, NewLabel, ProposedLabel, ValueChange,
 };
+pub use check::{AlbumGaps, DUPLICATE_WINDOW, DuplicateGroup, MissingFields, TrackGaps};
 pub use edit::{FieldEdit, InvalidTagEdit, TagEdit, TagField, TagWriteError};
 pub use error::{Error, Result};
 pub use favourites::{Favourite, FavouritesSummary};
 pub use labels::{LABEL_NAME_MAX, LABEL_PALETTE, Label, LabelId, valid_label_colour};
 pub use lookups::{CoverArtId, CoverLookup};
-pub use m3u::{M3uExport, m3u_file_name};
+pub use loves::{Love, QueuedLove};
+pub use lyrics::{
+    LYRICS_RETRY_NOT_FOUND, LocalLyrics, LyricLine, Lyrics, LyricsKey, LyricsLookup, LyricsQuery,
+    LyricsSource, LyricsText, OnlineLyrics, choose_lyrics, lyrics_lookup_due, parse_lrc,
+    read_local_lyrics,
+};
+pub use m3u::{M3uEntry, M3uExport, M3uImport, m3u_file_name};
 pub use playlists::{Playlist, PlaylistEntry, PlaylistId};
+pub use plays::PlayStats;
 pub use query::{Album, AlbumId, Artist, ArtistId, SearchResults, Track, TrackId};
 pub use scan::{ScanPhase, ScanProgress, ScanReport, SkippedFile};
 pub use scrobbles::{QueuedScrobble, Scrobble};
@@ -57,6 +70,11 @@ use error::io_error;
 /// Setting key: rescan at startup and watch the source directories for changes.
 /// Stored as "true" or "false"; absent means true.
 pub const SETTING_AUTO_UPDATE: &str = "library.auto_update";
+
+/// Setting key: the tracks already in the library before play history had their
+/// added dates taken from their files ("true"). Absent until the first scan after
+/// that migration, which does it once.
+pub const SETTING_ADDED_BACKFILLED: &str = "library.added_backfilled";
 
 /// What [`Library::write_tags`] did.
 #[derive(Debug, Default)]

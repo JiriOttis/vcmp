@@ -239,6 +239,7 @@ impl App {
         Event::TrackChanged(Some(NowPlaying {
             entry: QueueEntry::new(TrackRef::local(self.path(name))),
             duration: Some(Duration::from_secs(1)),
+            origin: None,
         }))
     }
 }
@@ -354,6 +355,7 @@ fn the_bar_marks_a_lossless_file_and_the_last_fm_play() {
         .handle_event(Event::TrackChanged(Some(NowPlaying {
             entry: app.entry("1.flac"),
             duration: Some(Duration::from_secs(100)),
+            origin: None,
         })));
     assert_eq!(app.state().get_lossless_format(), "FLAC");
     assert!(shown("Lossless (FLAC)"));
@@ -385,6 +387,20 @@ fn the_bar_marks_a_lossless_file_and_the_last_fm_play() {
     app.service.handle_event(Event::TrackChanged(None));
     assert_eq!(app.state().get_lossless_format(), "");
     assert_eq!(app.state().get_scrobble(), ScrobbleMark::None);
+}
+
+#[test]
+fn the_lossless_mark_shows_for_alac_and_aiff_but_not_aac() {
+    let songs = [
+        ("1.alac.m4a", Song::new("Apple Lossless", "Band", "Record")),
+        ("2.aiff", Song::new("AIFF", "Band", "Record")),
+        ("3.m4a", Song::new("AAC", "Band", "Record")),
+    ];
+    let app = start_with(&songs, &[], |_| {});
+    for (name, mark) in [("1.alac.m4a", "ALAC"), ("2.aiff", "AIFF"), ("3.m4a", "")] {
+        app.service.handle_event(app.now_playing(name));
+        assert_eq!(app.state().get_lossless_format(), mark, "{name}");
+    }
 }
 
 #[test]
@@ -1747,6 +1763,7 @@ fn the_sleep_timer_counts_down_then_stops_after_the_track_playing() {
         .handle_event(Event::TrackChanged(Some(NowPlaying {
             entry: app.entry("2.flac"),
             duration: None,
+            origin: None,
         })));
     assert_eq!(app.state().get_sleep_timer(), SleepTimer::Off);
     assert_eq!(app.state().get_state(), PlayState::Stopped);

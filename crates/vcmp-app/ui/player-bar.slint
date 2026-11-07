@@ -338,7 +338,7 @@ export component PlayerBar inherits Rectangle {
         // What is playing. The title and the cover lead to the album, the artist
         // to the artist; the cover is for the pointer, the title the keyboard's way.
         HorizontalLayout {
-            min-width: 136px;
+            min-width: 120px;
             preferred-width: 280px;
             horizontal-stretch: 1;
             spacing: Theme.space-m;
@@ -573,14 +573,41 @@ export component PlayerBar inherits Rectangle {
             }
         }
 
-        // The now playing view's and the queue panel's switches, the sleep timer and the
-        // volume.
+        // Lyrics, the now playing view's and the queue panel's switches, the sleep timer
+        // and the volume.
         HorizontalLayout {
-            min-width: 256px;
-            preferred-width: 280px;
+            // With the track's 120 px and the controls' 240 px, exactly 720 px
+            // (docs/ui.md, "Playback").
+            min-width: 272px;
+            preferred-width: 328px;
             horizontal-stretch: 1;
             alignment: end;
-            spacing: Theme.space-s;
+            spacing: Theme.space-xs;
+
+            // Opens now playing on the lyrics, switches it to them, or closes it when
+            // it shows them. Disabled while the track has none.
+            VerticalLayout {
+                alignment: center;
+
+                IconButton {
+                    glyph: Glyph.lyrics;
+                    checkable: true;
+                    active: PlayerState.now-playing-open && PlayerState.lyrics-shown && PlayerState.has-lyrics;
+                    enabled: PlayerState.has-lyrics;
+                    label: @tr("Lyrics");
+                    clicked => {
+                        if !PlayerState.now-playing-open {
+                            PlayerState.set-lyrics-shown(true);
+                            PlayerState.now-playing-open = true;
+                            PlayerState.load-large-cover();
+                        } else if PlayerState.lyrics-shown {
+                            PlayerState.now-playing-open = false;
+                        } else {
+                            PlayerState.set-lyrics-shown(true);
+                        }
+                    }
+                }
+            }
 
             VerticalLayout {
                 alignment: center;
@@ -639,6 +666,7 @@ export component PlayerBar inherits Rectangle {
                 max-width: 120px;
 
                 Slider {
+                    min-width: 52px;
                     accent-fill: false;
                     wheel: true;
                     value: PlayerState.muted ? 0 : PlayerState.volume;

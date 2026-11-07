@@ -74,7 +74,10 @@ fn main() {
                 .extension()
                 .and_then(|e| e.to_str())
                 .map(str::to_ascii_lowercase);
-            matches!(ext.as_deref(), Some("mp3" | "flac" | "ogg" | "oga" | "wav"))
+            matches!(
+                ext.as_deref(),
+                Some("mp3" | "flac" | "ogg" | "oga" | "wav" | "aif" | "aiff" | "aifc" | "m4a")
+            )
         })
         .collect();
     files.sort();

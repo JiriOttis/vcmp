@@ -30,8 +30,9 @@ player.send(Command::PlayContext { entries, origin: Some("album:42".into()), sta
   its path) and optional artist and album keys.
   - Shuffle uses the keys to keep the same artist or album apart.
   - Any value unique per artist and per album works, such as a database id.
-- **Playable formats:** MP3, FLAC, WAV and Ogg Vorbis. Opus is not supported (see the
-  spec's risk table).
+- **Playable formats:** MP3, FLAC, WAV, AIFF (and most AIFF-C), Ogg Vorbis,
+  and AAC and ALAC in MP4 (`.m4a`). Opus, WMA, APE and WavPack are not supported (see
+  the spec's risk table).
 - **Waiting for a command's effect:** `Command::Sync(token)` is answered with
   `Event::Synced(token)` once the commands sent before it are done. Events come in
   order, so whoever sees `Synced` has seen what those commands caused. The app
@@ -127,9 +128,10 @@ TrackSource ─► TrackStream ─► Converter ──────────�
 |---|---|
 | MP3 | The LAME/Xing (or `Lavf`/`Lavc`) header, read by symphonia. iTunes' `iTunSMPB` tag is not read |
 | Ogg Vorbis | Ogg granule positions |
-| FLAC, WAV | Nothing to trim |
+| FLAC, WAV, AIFF, ALAC | Nothing to trim |
+| AAC in MP4 | Nothing: symphonia reads neither the MP4 edit list nor `iTunSMPB`, so it is not trimmed (see [Known limits](#known-limits)) |
 
-Tests decode two halves of one tone, encoded separately in every format. They check:
+Tests decode two halves of one tone, encoded separately in every format but AAC. They check:
 
 - **Length:** the joined halves have exactly the original sample count.
 - **Waveform:** the joined halves match the uninterrupted waveform.
@@ -200,6 +202,11 @@ These are the agreed semantics. The pure logic is `Queue`, and the engine drives
 
 - **Context.** Playing an album, playlist or list makes it the *context*.
   - `origin` is the app's own key for it ("album:42"), handed back in `QueueView`.
+    `TrackChanged`'s `NowPlaying.origin` carries it too while the context's own
+    track plays, and `None` for a track taken from Up next
+    (`Queue::current_origin`); the app records it with each play in the play
+    history. It travels with the track change because `QueueChanged` for a new
+    context comes after it.
   - A new context clears the history.
 - **Up next.** "Play next" puts tracks at the front of Up next, and "Add to queue"
   appends them. Both come from track menus, the queue panel, and album cards' menus
@@ -316,6 +323,17 @@ paused.
 
 - **MP3 gapless:** an MP3 without a LAME/Xing header, or with only iTunes' `iTunSMPB`,
   plays with its encoder delay and padding, so with a small gap.
+- **AAC gapless:** AAC in MP4 plays with its encoder delay (1024 frames, 23 ms at
+  44.1 kHz) at the start of each track and its padding to whole 1024-frame packets
+  at the end. Between two tracks that is 1024 to 2047 extra frames, mostly near
+  silence: 23 to 46 ms at 44.1 kHz, 25 ms in the test fixtures. Durations include
+  the padding, and a seek lands 23 ms early in the music.
+  `aac_in_mp4_keeps_its_encoder_delay_and_padding` measures it and fails once
+  symphonia trims AAC. ALAC in the same container is gapless.
+- **AIFF-C compression:** AIFF-C files with PCM, floats, A-law or mu-law (`NONE`,
+  `sowt`, `twos`, `in24`, `in32`, `fl32`, `fl64`, `alaw`, `ulaw`) play. Other
+  compression types (`ima4`, `MAC3`, `MAC6`, `GSM `) are listed in the library and
+  fail to play when started.
 - **Linux without a PulseAudio server uses ALSA:** Settings lists "System default"
   first, then the sound servers ALSA reaches (PipeWire, JACK) and the cards' own
   devices. `output_devices` leaves out the plugins that convert or discard audio

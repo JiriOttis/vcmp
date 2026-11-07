@@ -7,6 +7,7 @@ import { Glyph } from "icons.slint";
 import { PlayerState } from "player-state.slint";
 import { MovingPicture, PictureSlot } from "picture.slint";
 import { WindowFrame } from "window-frame.slint";
+import { LyricsView } from "lyrics.slint";
 
 // The cover as large as the view allows: the full-size image once it is decoded,
 // the bar's small one until then, the title's first letter without any.
@@ -123,10 +124,12 @@ component NextTrack {
 
 // Title, artist and album, and what plays next. The title and the album lead to
 // the album, the artist to the artist, and the next track plays when chosen.
-// `centered` under the cover in a narrow window, beside it otherwise.
+// `centered` under the cover in a narrow window, beside it otherwise. Above the
+// lyrics, without what plays next.
 component TrackDetails inherits VerticalLayout {
     in property <bool> centered;
     in property <length> title-size: Theme.font-display;
+    in property <bool> show-next: true;
     callback show-album();
     callback show-artist();
     private property <TextHorizontalAlignment> align: root.centered ? TextHorizontalAlignment.center : TextHorizontalAlignment.left;
@@ -178,7 +181,7 @@ component TrackDetails inherits VerticalLayout {
         }
     }
 
-    if PlayerState.next-title != "": VerticalLayout {
+    if root.show-next && PlayerState.next-title != "": VerticalLayout {
         padding-top: Theme.space-xl;
 
         NextTrack {
@@ -189,8 +192,9 @@ component TrackDetails inherits VerticalLayout {
 
 // The track playing, large: its cover, title, artist and album, and what plays
 // next. It covers the pages; the player bar below stays and holds the controls.
-// Escape, the close button or a click on the background returns; this is where
-// lyrics would go later.
+// Escape, the close button or a click on the background returns. With lyrics shown
+// (remembered) and the track having some, the lyrics take the cover's place and the
+// cover goes small beside the title, in wide and narrow windows alike.
 export component NowPlayingView inherits Rectangle {
     callback close();
     // Leads to the playing track's album or artist.
@@ -209,6 +213,8 @@ export component NowPlayingView inherits Rectangle {
         ? min(root.height - root.room, root.width * 0.45, 880px)
         : min(root.width - root.room, root.height * 0.5, 880px));
     private property <length> title-size: root.width > 1800px ? Theme.font-display-wide : Theme.font-display;
+    private property <bool> lyrics-mode: PlayerState.lyrics-shown && PlayerState.has-lyrics;
+    private property <length> small-cover: Theme.target-height * 2;
 
     background: Theme.colors.base;
     accessible-role: groupbox;
@@ -237,7 +243,7 @@ export component NowPlayingView inherits Rectangle {
             }
         }
 
-        if root.wide: HorizontalLayout {
+        if root.wide && !root.lyrics-mode: HorizontalLayout {
             padding: Theme.space-xxl;
             spacing: Theme.space-xxl;
             alignment: center;
@@ -272,7 +278,7 @@ export component NowPlayingView inherits Rectangle {
             }
         }
 
-        if !root.wide: VerticalLayout {
+        if !root.wide && !root.lyrics-mode: VerticalLayout {
             padding: Theme.space-xxl;
             spacing: Theme.space-xl;
             alignment: center;
@@ -304,6 +310,66 @@ export component NowPlayingView inherits Rectangle {
             }
         }
 
+        // Below the buttons in the corners: the small cover and the names, then the
+        // lyrics.
+        if root.lyrics-mode: VerticalLayout {
+            padding: Theme.space-xxl;
+            padding-top: Theme.space-l * 2 + Theme.target-height;
+            spacing: Theme.space-xl;
+
+            Rectangle {
+                min-height: header.min-height;
+                preferred-height: header.preferred-height;
+
+                // Clicks between the texts keep the view open.
+                TouchArea { }
+                header := HorizontalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    alignment: center;
+                    spacing: Theme.space-l;
+
+                    VerticalLayout {
+                        alignment: center;
+
+                        BigCover {
+                            size: root.small-cover;
+                            clicked => {
+                                root.show-album();
+                            }
+                        }
+                    }
+                    TrackDetails {
+                        max-width: 480px;
+                        title-size: Theme.font-title;
+                        show-next: false;
+                        show-album => {
+                            root.show-album();
+                        }
+                        show-artist => {
+                            root.show-artist();
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+
+                // Clicks between the lines keep the view open.
+                TouchArea { }
+                HorizontalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    alignment: center;
+
+                    LyricsView {
+                        max-width: Theme.content-max-width;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+        }
+
         close-button := IconButton {
             x: Theme.space-l;
             y: Theme.space-l;
@@ -311,6 +377,19 @@ export component NowPlayingView inherits Rectangle {
             label: @tr("Close now playing");
             clicked => {
                 root.close();
+            }
+        }
+
+        // Lyrics or the cover, for a track with lyrics; beside the track's menu.
+        if PlayerState.has-lyrics: IconButton {
+            x: root.width - Theme.target-height * 2 - Theme.space-l - Theme.space-s;
+            y: WindowFrame.custom ? Theme.caption-button-height + Theme.space-s : Theme.space-l;
+            glyph: Glyph.lyrics;
+            checkable: true;
+            active: PlayerState.lyrics-shown;
+            label: @tr("Show lyrics");
+            clicked => {
+                PlayerState.set-lyrics-shown(!PlayerState.lyrics-shown);
             }
         }
 

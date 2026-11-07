@@ -873,6 +873,7 @@ fn agents_read_what_the_player_shows() {
     player.handle_event(Event::TrackChanged(Some(NowPlaying {
         entry: queued(&one),
         duration: Some(Duration::from_secs(90)),
+        origin: None,
     })));
     player.handle_event(Event::StateChanged(PlaybackState::Playing));
     player.handle_event(Event::Position(Duration::from_secs(12)));
@@ -946,6 +947,7 @@ fn agents_press_buttons_within_the_queue_and_set_options() {
     player.handle_event(Event::TrackChanged(Some(NowPlaying {
         entry: queued(&one),
         duration: Some(Duration::from_secs(60)),
+        origin: None,
     })));
     let long = player
         .agent_control(Control::Seek(Duration::from_secs(61)))

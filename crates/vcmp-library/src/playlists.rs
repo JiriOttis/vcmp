@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use image::codecs::jpeg::JpegEncoder;
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::animation;
 use crate::error::io_error;
@@ -99,7 +99,7 @@ impl Library {
         Ok(statement
             .query_map([id.0], |row| {
                 Ok(PlaylistEntry {
-                    position: row.get(15)?,
+                    position: row.get(16)?,
                     track: track_from(row)?,
                 })
             })?
@@ -107,15 +107,23 @@ impl Library {
     }
 
     pub fn create_playlist(&self, name: &str) -> Result<PlaylistId> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
-        self.conn.execute(
-            "INSERT INTO playlists (name, created_ms) VALUES (?1, ?2)",
-            params![name.trim(), now],
-        )?;
-        Ok(PlaylistId(self.conn.last_insert_rowid()))
+        insert_playlist(&self.conn, name.trim())
+    }
+
+    /// Makes a playlist holding `tracks` in one transaction, named `name`, or when
+    /// another playlist has that name (ignoring case) `name 2`, `name 3` and so on.
+    /// Returns it and the name it got.
+    pub(crate) fn create_filled_playlist(
+        &self,
+        name: &str,
+        tracks: &[TrackId],
+    ) -> Result<(PlaylistId, String)> {
+        let tx = self.conn.unchecked_transaction()?;
+        let name = free_name(&tx, name.trim())?;
+        let id = insert_playlist(&tx, &name)?;
+        insert_entries(&tx, id, tracks)?;
+        tx.commit()?;
+        Ok((id, name))
     }
 
     pub fn rename_playlist(&self, id: PlaylistId, name: &str) -> Result<()> {
@@ -243,14 +251,7 @@ impl Library {
             "DELETE FROM playlist_entries WHERE playlist_id = ?1",
             [id.0],
         )?;
-        {
-            let mut insert = tx.prepare_cached(
-                "INSERT INTO playlist_entries (playlist_id, position, track_id) VALUES (?1, ?2, ?3)",
-            )?;
-            for (position, track) in tracks.iter().enumerate() {
-                insert.execute(params![id.0, position as i64, track.0])?;
-            }
-        }
+        insert_entries(&tx, id, tracks)?;
         tx.commit()?;
         Ok(())
     }
@@ -299,6 +300,42 @@ impl Library {
         }
         self.artwork.mosaic(&keys)
     }
+}
+
+fn insert_playlist(conn: &Connection, name: &str) -> Result<PlaylistId> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    conn.execute(
+        "INSERT INTO playlists (name, created_ms) VALUES (?1, ?2)",
+        params![name, now],
+    )?;
+    Ok(PlaylistId(conn.last_insert_rowid()))
+}
+
+/// Appends `tracks` to a playlist with no entries after them.
+fn insert_entries(conn: &Connection, id: PlaylistId, tracks: &[TrackId]) -> Result<()> {
+    let mut insert = conn.prepare_cached(
+        "INSERT INTO playlist_entries (playlist_id, position, track_id) VALUES (?1, ?2, ?3)",
+    )?;
+    for (position, track) in tracks.iter().enumerate() {
+        insert.execute(params![id.0, position as i64, track.0])?;
+    }
+    Ok(())
+}
+
+/// `name`, or the first of `name 2`, `name 3`, ... that no playlist has, ignoring
+/// case as the playlist list's order does.
+fn free_name(conn: &Connection, name: &str) -> Result<String> {
+    let mut taken = conn.prepare("SELECT 1 FROM playlists WHERE name = ?1 COLLATE NOCASE")?;
+    let mut candidate = name.to_owned();
+    let mut number = 1;
+    while taken.exists([&candidate])? {
+        number += 1;
+        candidate = format!("{name} {number}");
+    }
+    Ok(candidate)
 }
 
 /// Deletes an owner's picture and the animation kept beside it.

@@ -3,13 +3,14 @@ import { ReduceMotion, Theme, ThemeKind, ThemePalette } from "theme.slint";
 import { NavItem, PlaylistLink, ScrollArea } from "components.slint";
 import { AboutPage, AlbumsPage, ArtistsPage, FoldersPage, PlaylistsPage, SearchPage, SettingsPage, SongsPage } from "pages.slint";
 import { FolderRow } from "folders-page.slint";
-import { SongColumn, SongRow, SongSelection } from "songs-page.slint";
+import { DayStamp, SongColumn, SongDates, SongRow, SongSelection } from "songs-page.slint";
 import { ArtistDetail } from "artist-page.slint";
 import { AlbumTile, ArtworkState } from "album-grid.slint";
 import { AlbumDetail, TrackRow, TrackSelection } from "album-page.slint";
 import { SelectionChange } from "selection.slint";
 import { PlaylistDetail } from "playlist-page.slint";
 import { Playlists } from "playlist-state.slint";
+import { PlaylistImport, PlaylistImportReport, UnmatchedEntry } from "playlist-import.slint";
 import { LibraryError, LibraryState, ScanPhase, SourceFolder, UnreadableFile } from "library-state.slint";
 import { ProgressBar } from "components.slint";
 import { PlayerProblem, PlayerState, PlayState, QueueRow, QueueSource, Repeat, ScrobbleMark, Shuffle, ShuffleKind, SleepTimer } from "player-state.slint";
@@ -18,12 +19,12 @@ import { QueuePanel } from "queue-panel.slint";
 import { NowPlayingView } from "now-playing.slint";
 import { MovingPictures, PictureFrame, PictureSlot } from "picture.slint";
 import { Glyph, IconArt } from "icons.slint";
-import { LastfmProblem, LastfmState, LastfmStatus } from "lastfm-state.slint";
+import { LastfmImport, LastfmProblem, LastfmState, LastfmStatus } from "lastfm-state.slint";
 import { SidebarUpdateNote, UpdateState } from "updates.slint";
 import { CoverPicker, CoverSearch, CoverSearchStatus } from "cover-picker.slint";
 import { PhotoPicker, PhotoSearch, PhotoSearchStatus } from "photo-picker.slint";
 import { TagChange, TagEditorState, TagEditorStatus, TagEditorView, TagFailure, TagFailureReason, TagField, TagMixed, TagProblem, TagValues } from "tag-editor.slint";
-import { ColumnWidths } from "columns.slint";
+import { ColumnWidths, SongColumns } from "columns.slint";
 import { AgentState, ChangeEntry, ChangeField, ChangeGroup, ChangeHistory, ChangeKind, ChangeProblem, ChangeReview, ChangeRow, ChangeStatus, ReviewStatus, ServerStatus, SidebarReviewNote } from "agents.slint";
 import { LabelChoice, LabelEditor, LabelEntry, LabelFilterPage, LabelProblem, Labels, PaletteColour } from "labels.slint";
 import { LabelDetail, LabelsPage } from "label-page.slint";
@@ -31,20 +32,22 @@ import { CaptionButtons, WindowFrame } from "window-frame.slint";
 import { ConfirmDialog, Confirmation } from "confirmation.slint";
 import { Setup, SetupWizard } from "setup.slint";
 import { Favourites } from "favourites.slint";
+import { CheckList, CheckTab, CheckTrack, CoverlessAlbum, DuplicateBlock, GapBlock, LibraryCheck, LibraryCheckPage } from "library-check.slint";
 import { AccentTile, ContrastFailure, InvalidThemeFile, ThemeFileProblem, Themes, ThemeTile } from "themes.slint";
 
 export { Confirmation, Favourites, Setup, WindowFrame }
 export { AccentTile, ContrastFailure, InvalidThemeFile, ThemeFileProblem, Themes, ThemeTile }
 export { LabelChoice, LabelDetail, LabelEntry, LabelFilterPage, LabelProblem, Labels, PaletteColour }
 export { AgentState, ChangeEntry, ChangeField, ChangeGroup, ChangeKind, ChangeProblem, ChangeRow, ChangeStatus, ReviewStatus, ServerStatus }
-export { LastfmProblem, LastfmState, LastfmStatus }
+export { LastfmImport, LastfmProblem, LastfmState, LastfmStatus }
 export { Glyph, IconArt, PlayerProblem, PlayerState, PlayState, QueueRow, QueueSource, Repeat, ScrobbleMark, Shuffle, ShuffleKind, SleepTimer }
 export { CoverSearch, CoverSearchStatus, PhotoSearch, PhotoSearchStatus }
+export { CheckList, CheckTab, CheckTrack, CoverlessAlbum, DuplicateBlock, GapBlock, LibraryCheck }
 export { TagChange, TagEditorState, TagEditorStatus, TagFailure, TagFailureReason, TagField, TagMixed, TagProblem, TagValues }
-export { FolderRow, PlaylistDetail, Playlists, SongColumn, SongRow, SongSelection }
+export { DayStamp, FolderRow, PlaylistDetail, PlaylistImport, Playlists, SongColumn, SongDates, SongRow, SongSelection, UnmatchedEntry }
 export { SelectionChange }
 export { MovingPictures, PictureFrame, PictureSlot }
-export { ColumnWidths }
+export { ColumnWidths, SongColumns }
 export { UpdateState }
 export { TrackSelection }
 export { AlbumDetail, AlbumTile, ArtistDetail, ArtworkState, LibraryError, LibraryState, ReduceMotion, ScanPhase, SourceFolder, Theme, ThemeKind, ThemePalette, TrackRow, UnreadableFile }
@@ -104,6 +107,8 @@ export component AppWindow inherits Window {
     callback playlist-range-changed(int, int);
     // Makes a playlist with this name and opens it.
     callback create-playlist(string);
+    // Asks for an M3U file, makes a playlist of it and opens it.
+    callback import-playlist();
     // Edits the open playlist.
     callback rename-playlist(string);
     callback delete-playlist();
@@ -223,6 +228,11 @@ export component AppWindow inherits Window {
     changed open-label-index => {
         root.navigated();
     }
+    // The Library check, opened from Settings in its place.
+    private property <bool> check-open: LibraryCheck.open;
+    changed check-open => {
+        root.navigated();
+    }
 
     // Shows a section on its grid, not on the album, artist or playlist it last
     // showed, as its sidebar entry does.
@@ -240,6 +250,9 @@ export component AppWindow inherits Window {
         }
         if page == Page.labels && root.label-open {
             labels-page.close-label();
+        }
+        if page == Page.settings && LibraryCheck.open {
+            LibraryCheck.open = false;
         }
     }
 
@@ -351,7 +364,7 @@ export component AppWindow inherits Window {
     changed system-scheme-known => {
         Theme.system-scheme-changed();
     }
-    private property <bool> sidebar-covered: root.now-playing-shown > 0 || PlayerState.now-playing-open || CoverSearch.open || PhotoSearch.open || TagEditorState.open || AgentState.history-open || AgentState.review-open || Labels.editor-open || Setup.open || Confirmation.open;
+    private property <bool> sidebar-covered: root.now-playing-shown > 0 || PlayerState.now-playing-open || CoverSearch.open || PhotoSearch.open || TagEditorState.open || AgentState.history-open || AgentState.review-open || Labels.editor-open || Setup.open || PlaylistImport.open || Confirmation.open;
     out property <length> frame-sidebar-width: sidebar.width;
     out property <length> frame-sidebar-drag-height: root.sidebar-covered ? 0px : max(0px, sidebar-scroll.y + sidebar-scroll.content-y + sidebar-content.y + nav-list.y - Theme.space-s);
     changed frame-sidebar-drag-height => {
@@ -780,6 +793,10 @@ export component AppWindow inherits Window {
                                 root.opened-from-search = false;
                                 root.create-playlist(name);
                             }
+                            import-playlist => {
+                                root.opened-from-search = false;
+                                root.import-playlist();
+                            }
                             play(start, shuffle) => {
                                 root.play-playlist(start, shuffle);
                             }
@@ -875,12 +892,17 @@ export component AppWindow inherits Window {
                                 root.queue-folder-file(index, next);
                             }
                         }
-                        if root.current-page == Page.settings: ScrollArea {
+                        if root.current-page == Page.settings && !LibraryCheck.open: ScrollArea {
                             x: 0;
                             width: root.page-width;
                             SettingsPage {
                                 width: parent.width;
                             }
+                        }
+                        if root.current-page == Page.settings && LibraryCheck.open: LibraryCheckPage {
+                            x: 0;
+                            width: root.page-width;
+                            height: parent.height;
                         }
                         if root.current-page == Page.about: ScrollArea {
                             x: 0;
@@ -959,6 +981,12 @@ export component AppWindow inherits Window {
 
                 // The setup wizard, at the first start or from Settings.
                 if Setup.open: SetupWizard {
+                    width: parent.width;
+                    height: parent.height;
+                }
+
+                // What an import of a playlist file left out.
+                if PlaylistImport.open: PlaylistImportReport {
                     width: parent.width;
                     height: parent.height;
                 }

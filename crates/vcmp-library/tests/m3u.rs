@@ -1,7 +1,8 @@
 //! Exporting playlists as M3U files: the file's lines, paths relative to the playlist
-//! file or absolute, names outside ASCII, repeated entries and missing files. Each
-//! test copies the fixtures into a temporary directory and writes the playlist file
-//! there.
+//! file or absolute, names outside ASCII, repeated entries and missing files. And
+//! importing them: paths of every form, tags when the path doesn't match, what
+//! matched nothing, the encoding, the name, and an export read back. Each test copies
+//! the fixtures into a temporary directory and writes the playlist file there.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,7 +12,7 @@ use lofty::config::WriteOptions;
 use lofty::file::TaggedFileExt;
 use lofty::tag::{Accessor, Tag, TagExt};
 use tempfile::TempDir;
-use vcmp_library::{Error, Library, M3uExport, PlaylistId, TrackId};
+use vcmp_library::{Error, Library, M3uEntry, M3uExport, M3uImport, PlaylistId, TrackId};
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
 
@@ -75,6 +76,24 @@ impl Setup {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         let report = self.library.export_playlist(id, &file).unwrap();
         (fs::read_to_string(&file).unwrap(), report)
+    }
+
+    /// Writes `text` to `file` (under the temporary directory) and imports it.
+    fn import(&self, file: &str, text: impl AsRef<[u8]>) -> M3uImport {
+        let file = self.base.join(file);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, text).unwrap();
+        self.library.import_playlist(&file, "Playlist 1").unwrap()
+    }
+
+    fn entries(&self, id: Option<PlaylistId>) -> Vec<TrackId> {
+        let id = id.expect("a playlist was made");
+        self.library
+            .playlist_entries(id)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.track.id)
+            .collect()
     }
 }
 
@@ -223,4 +242,193 @@ fn a_track_on_another_filesystem_gets_its_absolute_path() {
         fs::read_to_string(&file).unwrap(),
         format!("#EXTM3U\n#EXTINF:1,Band - One\n{}\n", one.display())
     );
+}
+
+#[test]
+fn an_exported_playlist_reads_back_the_same_repeats_included() {
+    let mut setup = Setup::new();
+    let one = setup.add("Band/01 One.flac", "Band", "One");
+    let largo = setup.add("Dvořák/01 Largo.flac", "Antonín Dvořák", "Largo");
+    setup.scan();
+    let (one, largo) = (setup.id(&one), setup.id(&largo));
+    let id = setup.playlist(&[one, largo, one]);
+
+    let mut names = Vec::new();
+    for file in ["music/Mix.m3u8", "Playlists/Shared/Mix.m3u8"] {
+        setup.export(id, file);
+        let imported = setup
+            .library
+            .import_playlist(&setup.base.join(file), "Playlist 1")
+            .unwrap();
+        assert_eq!(imported.entries, 3);
+        assert!(imported.unmatched.is_empty(), "{:?}", imported.unmatched);
+        assert_eq!(setup.entries(imported.playlist), [one, largo, one]);
+        names.push(imported.name);
+    }
+    assert_eq!(names, ["Mix 2", "Mix 3"]);
+}
+
+#[test]
+fn paths_match_relative_or_absolute_with_either_separator() {
+    let mut setup = Setup::new();
+    let one = setup.add("Band/1.flac", "Band", "One");
+    let two = setup.add("Band/2.flac", "Band", "Two");
+    let three = setup.add("Band/3.flac", "Band", "Three");
+    setup.scan();
+
+    let text = format!(
+        "../music/Band/1.flac\n..\\music\\.\\Band\\2.flac\n{}\n",
+        three.display()
+    );
+    let imported = setup.import("Lists/Mix.m3u", text);
+    assert_eq!(imported.name, "Mix");
+    assert!(imported.unmatched.is_empty(), "{:?}", imported.unmatched);
+    assert_eq!(
+        setup.entries(imported.playlist),
+        [setup.id(&one), setup.id(&two), setup.id(&three)]
+    );
+}
+
+#[test]
+fn file_urls_and_a_byte_order_mark_are_understood() {
+    let mut setup = Setup::new();
+    let one = setup.add("My Band/01 One.flac", "Band", "One");
+    setup.scan();
+
+    let url = url::Url::from_file_path(&one).unwrap();
+    let imported = setup.import("vlc.m3u", format!("\u{FEFF}#EXTM3U\n{url}\n"));
+    assert_eq!(setup.entries(imported.playlist), [setup.id(&one)]);
+}
+
+#[test]
+fn a_file_that_is_not_utf8_is_read_as_windows_1252() {
+    let mut setup = Setup::new();
+    let one = setup.add("Café/01.flac", "Band", "One");
+    setup.scan();
+
+    let imported = setup.import(
+        "legacy.m3u",
+        b"#EXTM3U\r\nmusic\\Caf\xe9\\01.flac\r\n".as_slice(),
+    );
+    assert!(imported.unmatched.is_empty(), "{:?}", imported.unmatched);
+    assert_eq!(setup.entries(imported.playlist), [setup.id(&one)]);
+}
+
+#[test]
+fn a_missing_track_matches_by_its_last_known_path() {
+    let mut setup = Setup::new();
+    let one = setup.add("1.flac", "Band", "One");
+    setup.scan();
+    let id = setup.id(&one);
+    fs::remove_file(&one).unwrap();
+    setup.scan();
+
+    let imported = setup.import("music/Mix.m3u8", "1.flac\n");
+    assert_eq!(setup.entries(imported.playlist), [id]);
+}
+
+#[test]
+fn entries_whose_path_does_not_match_try_their_tags_and_the_rest_are_listed() {
+    let mut setup = Setup::new();
+    let largo = setup.add("1.flac", "Antonín Dvořák", "Largo");
+    let one = setup.add("2.flac", "Band", "One");
+    // The same song outside the library, as a playlist made on another copy names it.
+    let copy = setup.base.join("copy/One.flac");
+    fs::create_dir_all(copy.parent().unwrap()).unwrap();
+    fs::copy(&one, &copy).unwrap();
+    setup.scan();
+
+    let text = format!(
+        "#EXTM3U\n\
+         #EXTINF:1,ANTONIN  DVORAK - largo\n/phone/Music/Largo.mp3\n\
+         #EXTINF:1,Band - One\n{}\n\
+         #EXTINF:1,Band - Missing\nmissing.flac\n\
+         stream.mp3\n\
+         #EXTINF:-1,Radio\nhttp://example.com/stream\n",
+        copy.display()
+    );
+    let imported = setup.import("Mix.m3u8", text);
+    assert_eq!(
+        setup.entries(imported.playlist),
+        [setup.id(&largo), setup.id(&one)]
+    );
+    assert_eq!(imported.entries, 5);
+    assert_eq!(
+        imported.unmatched,
+        [
+            M3uEntry {
+                location: "missing.flac".into(),
+                title: Some("Band - Missing".into()),
+                seconds: Some(1.0),
+            },
+            M3uEntry {
+                location: "stream.mp3".into(),
+                title: None,
+                seconds: None,
+            },
+            M3uEntry {
+                location: "http://example.com/stream".into(),
+                title: Some("Radio".into()),
+                seconds: None,
+            },
+        ]
+    );
+}
+
+#[test]
+fn nothing_is_made_when_no_entry_matches() {
+    let mut setup = Setup::new();
+    setup.add("1.flac", "Band", "One");
+    setup.scan();
+
+    let imported = setup.import("Nothing.m3u", "#EXTM3U\n#EXTINF:1,Band - Two\ntwo.flac\n");
+    assert_eq!(imported.playlist, None);
+    assert_eq!(imported.name, "");
+    assert_eq!((imported.entries, imported.unmatched.len()), (1, 1));
+
+    let empty = setup.import("Empty.m3u8", "#EXTM3U\n");
+    assert_eq!((empty.playlist, empty.entries), (None, 0));
+    assert!(setup.library.playlists().unwrap().is_empty());
+
+    assert!(matches!(
+        setup
+            .library
+            .import_playlist(&setup.base.join("none.m3u"), "Playlist 1"),
+        Err(Error::Io { .. })
+    ));
+}
+
+#[test]
+fn a_taken_name_gets_a_number() {
+    let mut setup = Setup::new();
+    setup.add("1.flac", "Band", "One");
+    setup.scan();
+    setup.library.create_playlist("Road trip").unwrap();
+
+    let first = setup.import("Road trip.m3u8", "music/1.flac\n");
+    let second = setup.import("road TRIP.m3u", "music/1.flac\n");
+    assert_eq!(
+        (first.name.as_str(), second.name.as_str()),
+        ("Road trip 2", "road TRIP 3")
+    );
+    let names: Vec<String> = setup
+        .library
+        .playlists()
+        .unwrap()
+        .into_iter()
+        .map(|playlist| playlist.name)
+        .collect();
+    assert_eq!(names, ["Road trip", "Road trip 2", "road TRIP 3"]);
+}
+
+/// Windows paths ignore case, so a path in other case than the file's still matches.
+#[cfg(windows)]
+#[test]
+fn a_path_in_other_case_matches_on_windows() {
+    let mut setup = Setup::new();
+    let one = setup.add("Band/1.flac", "Band", "One");
+    setup.scan();
+
+    let imported = setup.import("Mix.m3u", "MUSIC\\BAND\\1.FLAC\n");
+    assert_eq!(setup.entries(imported.playlist), [setup.id(&one)]);
 }

@@ -5,11 +5,46 @@ import { PlayerState } from "player-state.slint";
 import { Playlists } from "playlist-state.slint";
 import { TagEditorState } from "tag-editor.slint";
 import { SelectionChange } from "selection.slint";
-import { ColumnEdge, ColumnWidths } from "columns.slint";
+import { ColumnEdge, ColumnWidths, SongColumns } from "columns.slint";
 import { LabelChips, LabelEntry, LabelWords, Labels } from "labels.slint";
 import { Favourites } from "favourites.slint";
 
-export enum SongColumn { title, artist, album, year, duration }
+export enum SongColumn { title, artist, album, year, duration, plays, last-played, added }
+
+// A day in local time, for the Last played and Added columns.
+export struct DayStamp {
+    // Calendar days since 1 January 1970, or -1 for none (a track never played).
+    day: int,
+    // The date, shown once it is a week or more ago.
+    day-of-month: int,
+    month: int,
+    year: int,
+}
+
+// How a `DayStamp` reads: Today, Yesterday, 2 to 6 days ago, then the date.
+export global SongDates {
+    // Today as a `DayStamp.day`; src/library_view.rs moves it on after midnight.
+    in property <int> today;
+    out property <[string]> months: [@tr("Jan"), @tr("Feb"), @tr("Mar"), @tr("Apr"), @tr("May"), @tr("Jun"), @tr("Jul"), @tr("Aug"), @tr("Sep"), @tr("Oct"), @tr("Nov"), @tr("Dec")];
+
+    public pure function text(stamp: DayStamp) -> string {
+        if stamp.day < 0 {
+            return "";
+        }
+        // A day ahead of today (the clock was moved back) reads as today.
+        let ago = max(0, SongDates.today - stamp.day);
+        if ago == 0 {
+            return @tr("Today");
+        }
+        if ago == 1 {
+            return @tr("Yesterday");
+        }
+        if ago < 7 {
+            return @tr("{n} day ago" | "{n} days ago" % ago);
+        }
+        return @tr("{0} {1} {2}", stamp.day-of-month, SongDates.months[stamp.month - 1], stamp.year);
+    }
+}
 
 // One track in the songs table.
 export struct SongRow {
@@ -29,6 +64,10 @@ export struct SongRow {
     track-id: int,
     // The track is among the favourites; the table has no hearts, its menu says.
     liked: bool,
+    // How often the track was played, when it last was, and when VCMP first saw it.
+    plays: int,
+    last-played: DayStamp,
+    added: DayStamp,
 }
 
 // The selection in the songs table, kept in its rows, as `TrackSelection` does for
@@ -49,13 +88,23 @@ global LabelColumn {
     out property <length> width: 140px;
 }
 
-// A column header: sorts by its column, and shows the direction while it does.
+// The widths of the columns that don't stretch.
+global FixedColumns {
+    out property <length> year: 56px;
+    out property <length> duration: 64px;
+    out property <length> plays: 56px;
+    out property <length> date: 104px;
+}
+
+// A column header: sorts by its column, and shows the direction while it does. A
+// right click asks for the menu of columns.
 component ColumnHeader {
     in property <string> text;
     in property <bool> sorted;
     in property <bool> descending;
     in property <bool> right-aligned;
     callback clicked();
+    callback menu-requested(length, length);
 
     min-height: Theme.target-height;
     accessible-role: button;
@@ -106,6 +155,11 @@ component ColumnHeader {
         clicked => {
             Theme.keyboard-navigation = false;
             root.clicked();
+        }
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                root.menu-requested(root.absolute-position.x + self.mouse-x, root.absolute-position.y + self.mouse-y);
+            }
         }
     }
 
@@ -233,7 +287,7 @@ component SongLine {
             overflow: elide;
             accessible-role: none;
         }
-        Text {
+        if SongColumns.artist: Text {
             horizontal-stretch: ColumnWidths.song-artist;
             preferred-width: 0;
             min-width: 0;
@@ -244,7 +298,7 @@ component SongLine {
             overflow: elide;
             accessible-role: none;
         }
-        Text {
+        if SongColumns.album: Text {
             horizontal-stretch: ColumnWidths.song-album;
             preferred-width: 0;
             min-width: 0;
@@ -269,8 +323,8 @@ component SongLine {
                 }
             }
         }
-        Text {
-            width: 56px;
+        if SongColumns.year: Text {
+            width: FixedColumns.year;
             text: root.song.year;
             color: root.secondary;
             font-size: Theme.font-body;
@@ -278,13 +332,42 @@ component SongLine {
             vertical-alignment: center;
             accessible-role: none;
         }
-        Text {
-            width: 64px;
+        if SongColumns.duration: Text {
+            width: FixedColumns.duration;
             text: root.song.duration;
             color: root.secondary;
             font-size: Theme.font-body;
             horizontal-alignment: right;
             vertical-alignment: center;
+            accessible-role: none;
+        }
+        if SongColumns.plays: Text {
+            width: FixedColumns.plays;
+            text: root.song.plays;
+            color: root.secondary;
+            font-size: Theme.font-body;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        if SongColumns.last-played: Text {
+            width: FixedColumns.date;
+            text: SongDates.text(root.song.last-played);
+            color: root.secondary;
+            font-size: Theme.font-body;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            overflow: elide;
+            accessible-role: none;
+        }
+        if SongColumns.added: Text {
+            width: FixedColumns.date;
+            text: SongDates.text(root.song.added);
+            color: root.secondary;
+            font-size: Theme.font-body;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            overflow: elide;
             accessible-role: none;
         }
     }
@@ -339,7 +422,10 @@ export component SongTable {
     // Puts a song into Up next: at its front (`next`), or at its end.
     callback queue(int, bool);
 
-    private property <bool> labels-column: Labels.all.length > 0;
+    private property <bool> labels-column: Labels.all.length > 0 && SongColumns.labels;
+    // The Artist column's width, worked out from the title's: the text columns share
+    // their room in the proportion of their shares.
+    private property <length> artist-width: title-header.width * ColumnWidths.song-artist / ColumnWidths.song-title;
     private property <int> current: 0;
     // Where a Shift range starts, and how many rows are selected.
     private property <int> anchor: 0;
@@ -383,6 +469,10 @@ export component SongTable {
         menu.show({ x: x - menu.absolute-position.x, y: y - menu.absolute-position.y });
     }
 
+    function show-header-menu(x: length, y: length) {
+        header-menu.show({ x: x - header-menu.absolute-position.x, y: y - header-menu.absolute-position.y });
+    }
+
     changed songs => {
         root.current = max(0, min(root.current, root.songs.length - 1));
         // A new sort or filter: nothing in it is selected.
@@ -393,96 +483,254 @@ export component SongTable {
     VerticalLayout {
         spacing: Theme.space-xs;
 
-        // The headings sort; the edges between the text columns resize them.
-        Rectangle {
-            min-height: Theme.target-height;
+        // The headings sort; the edges between the text columns resize them. A right
+        // click on them, or the Menu key, opens the menu that shows and hides columns;
+        // in a MenuHost like the rows' menu.
+        header-host := MenuHost {
+            height: Theme.target-height;
+            min-width: header-menu.min-width;
+            preferred-width: header-menu.preferred-width;
+            max-width: header-menu.max-width;
 
-            Columns {
+            header-menu := ContextMenuArea {
+                x: header-host.shift-x;
+                y: header-host.shift-y;
+                width: header-host.width;
+                height: header-host.height;
+
+                Menu {
+                    MenuItem {
+                        title: @tr("Artist");
+                        checkable: true;
+                        checked: SongColumns.artist;
+                        activated => {
+                            SongColumns.artist = !SongColumns.artist;
+                            SongColumns.toggled();
+                        }
+                    }
+                    MenuItem {
+                        title: @tr("Album");
+                        checkable: true;
+                        checked: SongColumns.album;
+                        activated => {
+                            SongColumns.album = !SongColumns.album;
+                            SongColumns.toggled();
+                        }
+                    }
+                    // Only while there are labels to show.
+                    if Labels.all.length > 0: MenuItem {
+                        title: @tr("Labels");
+                        checkable: true;
+                        checked: SongColumns.labels;
+                        activated => {
+                            SongColumns.labels = !SongColumns.labels;
+                            SongColumns.toggled();
+                        }
+                    }
+                    MenuItem {
+                        title: @tr("Year");
+                        checkable: true;
+                        checked: SongColumns.year;
+                        activated => {
+                            SongColumns.year = !SongColumns.year;
+                            SongColumns.toggled();
+                        }
+                    }
+                    MenuItem {
+                        title: @tr("Time");
+                        checkable: true;
+                        checked: SongColumns.duration;
+                        activated => {
+                            SongColumns.duration = !SongColumns.duration;
+                            SongColumns.toggled();
+                        }
+                    }
+                    MenuItem {
+                        title: @tr("Plays");
+                        checkable: true;
+                        checked: SongColumns.plays;
+                        activated => {
+                            SongColumns.plays = !SongColumns.plays;
+                            SongColumns.toggled();
+                        }
+                    }
+                    MenuItem {
+                        title: @tr("Last played");
+                        checkable: true;
+                        checked: SongColumns.last-played;
+                        activated => {
+                            SongColumns.last-played = !SongColumns.last-played;
+                            SongColumns.toggled();
+                        }
+                    }
+                    MenuItem {
+                        title: @tr("Added");
+                        checkable: true;
+                        checked: SongColumns.added;
+                        activated => {
+                            SongColumns.added = !SongColumns.added;
+                            SongColumns.toggled();
+                        }
+                    }
+                }
+
                 Rectangle {
-                    width: SongCells.play;
-                }
-                title-header := ColumnHeader {
-                    horizontal-stretch: ColumnWidths.song-title;
-                    preferred-width: 0;
-                    min-width: 0;
-                    text: @tr("Title");
-                    sorted: root.sort-column == SongColumn.title;
-                    descending: root.sort-descending;
-                    clicked => {
-                        root.sort(SongColumn.title);
-                    }
-                }
-                artist-header := ColumnHeader {
-                    horizontal-stretch: ColumnWidths.song-artist;
-                    preferred-width: 0;
-                    min-width: 0;
-                    text: @tr("Artist");
-                    sorted: root.sort-column == SongColumn.artist;
-                    descending: root.sort-descending;
-                    clicked => {
-                        root.sort(SongColumn.artist);
-                    }
-                }
-                ColumnHeader {
-                    horizontal-stretch: ColumnWidths.song-album;
-                    preferred-width: 0;
-                    min-width: 0;
-                    text: @tr("Album");
-                    sorted: root.sort-column == SongColumn.album;
-                    descending: root.sort-descending;
-                    clicked => {
-                        root.sort(SongColumn.album);
-                    }
-                }
-                if root.labels-column: Text {
-                    width: LabelColumn.width;
-                    text: @tr("Labels");
-                    color: Theme.colors.text-muted;
-                    font-size: Theme.font-small;
-                    vertical-alignment: center;
-                }
-                ColumnHeader {
-                    width: 56px;
-                    text: @tr("Year");
-                    right-aligned: true;
-                    sorted: root.sort-column == SongColumn.year;
-                    descending: root.sort-descending;
-                    clicked => {
-                        root.sort(SongColumn.year);
-                    }
-                }
-                ColumnHeader {
-                    width: 64px;
-                    text: @tr("Time");
-                    right-aligned: true;
-                    sorted: root.sort-column == SongColumn.duration;
-                    descending: root.sort-descending;
-                    clicked => {
-                        root.sort(SongColumn.duration);
-                    }
-                }
-            }
+                    min-height: Theme.target-height;
 
-            ColumnEdge {
-                x: title-header.x + title-header.width;
-                height: parent.height;
-                label: @tr("Width of the {} column", @tr("Title"));
-                first <=> ColumnWidths.song-title;
-                second <=> ColumnWidths.song-artist;
-                first-width: title-header.width;
-                resized => {
-                    ColumnWidths.save();
-                }
-            }
-            ColumnEdge {
-                x: artist-header.x + artist-header.width;
-                height: parent.height;
-                label: @tr("Width of the {} column", @tr("Artist"));
-                first <=> ColumnWidths.song-artist;
-                second <=> ColumnWidths.song-album;
-                first-width: artist-header.width;
-                resized => {
-                    ColumnWidths.save();
+                    Columns {
+                        Rectangle {
+                            width: SongCells.play;
+                        }
+                        title-header := ColumnHeader {
+                            horizontal-stretch: ColumnWidths.song-title;
+                            preferred-width: 0;
+                            min-width: 0;
+                            text: @tr("Title");
+                            sorted: root.sort-column == SongColumn.title;
+                            descending: root.sort-descending;
+                            clicked => {
+                                root.sort(SongColumn.title);
+                            }
+                            menu-requested(x, y) => {
+                                root.show-header-menu(x, y);
+                            }
+                        }
+                        if SongColumns.artist: ColumnHeader {
+                            horizontal-stretch: ColumnWidths.song-artist;
+                            preferred-width: 0;
+                            min-width: 0;
+                            text: @tr("Artist");
+                            sorted: root.sort-column == SongColumn.artist;
+                            descending: root.sort-descending;
+                            clicked => {
+                                root.sort(SongColumn.artist);
+                            }
+                            menu-requested(x, y) => {
+                                root.show-header-menu(x, y);
+                            }
+                        }
+                        if SongColumns.album: ColumnHeader {
+                            horizontal-stretch: ColumnWidths.song-album;
+                            preferred-width: 0;
+                            min-width: 0;
+                            text: @tr("Album");
+                            sorted: root.sort-column == SongColumn.album;
+                            descending: root.sort-descending;
+                            clicked => {
+                                root.sort(SongColumn.album);
+                            }
+                            menu-requested(x, y) => {
+                                root.show-header-menu(x, y);
+                            }
+                        }
+                        if root.labels-column: Text {
+                            width: LabelColumn.width;
+                            text: @tr("Labels");
+                            color: Theme.colors.text-muted;
+                            font-size: Theme.font-small;
+                            vertical-alignment: center;
+                        }
+                        if SongColumns.year: ColumnHeader {
+                            width: FixedColumns.year;
+                            text: @tr("Year");
+                            right-aligned: true;
+                            sorted: root.sort-column == SongColumn.year;
+                            descending: root.sort-descending;
+                            clicked => {
+                                root.sort(SongColumn.year);
+                            }
+                            menu-requested(x, y) => {
+                                root.show-header-menu(x, y);
+                            }
+                        }
+                        if SongColumns.duration: ColumnHeader {
+                            width: FixedColumns.duration;
+                            text: @tr("Time");
+                            right-aligned: true;
+                            sorted: root.sort-column == SongColumn.duration;
+                            descending: root.sort-descending;
+                            clicked => {
+                                root.sort(SongColumn.duration);
+                            }
+                            menu-requested(x, y) => {
+                                root.show-header-menu(x, y);
+                            }
+                        }
+                        if SongColumns.plays: ColumnHeader {
+                            width: FixedColumns.plays;
+                            text: @tr("Plays");
+                            right-aligned: true;
+                            sorted: root.sort-column == SongColumn.plays;
+                            descending: root.sort-descending;
+                            clicked => {
+                                root.sort(SongColumn.plays);
+                            }
+                            menu-requested(x, y) => {
+                                root.show-header-menu(x, y);
+                            }
+                        }
+                        if SongColumns.last-played: ColumnHeader {
+                            width: FixedColumns.date;
+                            text: @tr("Last played");
+                            right-aligned: true;
+                            sorted: root.sort-column == SongColumn.last-played;
+                            descending: root.sort-descending;
+                            clicked => {
+                                root.sort(SongColumn.last-played);
+                            }
+                            menu-requested(x, y) => {
+                                root.show-header-menu(x, y);
+                            }
+                        }
+                        if SongColumns.added: ColumnHeader {
+                            width: FixedColumns.date;
+                            text: @tr("Added");
+                            right-aligned: true;
+                            sorted: root.sort-column == SongColumn.added;
+                            descending: root.sort-descending;
+                            clicked => {
+                                root.sort(SongColumn.added);
+                            }
+                            menu-requested(x, y) => {
+                                root.show-header-menu(x, y);
+                            }
+                        }
+                    }
+
+                    // Between the title and the next text column shown.
+                    if SongColumns.artist: ColumnEdge {
+                        x: title-header.x + title-header.width;
+                        height: parent.height;
+                        label: @tr("Width of the {} column", @tr("Title"));
+                        first <=> ColumnWidths.song-title;
+                        second <=> ColumnWidths.song-artist;
+                        first-width: title-header.width;
+                        resized => {
+                            ColumnWidths.save();
+                        }
+                    }
+                    if !SongColumns.artist && SongColumns.album: ColumnEdge {
+                        x: title-header.x + title-header.width;
+                        height: parent.height;
+                        label: @tr("Width of the {} column", @tr("Title"));
+                        first <=> ColumnWidths.song-title;
+                        second <=> ColumnWidths.song-album;
+                        first-width: title-header.width;
+                        resized => {
+                            ColumnWidths.save();
+                        }
+                    }
+                    if SongColumns.artist && SongColumns.album: ColumnEdge {
+                        x: title-header.x + title-header.width + Theme.space-l + root.artist-width;
+                        height: parent.height;
+                        label: @tr("Width of the {} column", @tr("Artist"));
+                        first <=> ColumnWidths.song-artist;
+                        second <=> ColumnWidths.song-album;
+                        first-width: root.artist-width;
+                        resized => {
+                            ColumnWidths.save();
+                        }
+                    }
                 }
             }
         }

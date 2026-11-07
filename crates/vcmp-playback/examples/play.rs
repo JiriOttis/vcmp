@@ -18,7 +18,7 @@ use vcmp_playback::{
     Command, Event, Player, PlayerOptions, QueueEntry, ShuffleMode, TrackRef, output_devices,
 };
 
-const EXTENSIONS: [&str; 4] = ["mp3", "flac", "wav", "ogg"];
+const EXTENSIONS: [&str; 8] = ["mp3", "flac", "wav", "ogg", "m4a", "aif", "aiff", "aifc"];
 
 fn collect(path: &Path, files: &mut Vec<PathBuf>) {
     if path.is_dir() {

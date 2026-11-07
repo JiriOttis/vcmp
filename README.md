@@ -15,7 +15,8 @@ A player for the music files on your own drives, for Windows 10 and newer and Li
 - Lets you browse by album, artist, song, folder, playlist or label, and search for
   any part of a name. Ctrl+F filters the page you are on, and the mouse's back and
   forward buttons move through the pages you have visited.
-- Plays MP3, FLAC, WAV and Ogg Vorbis without gaps between tracks, with a queue,
+- Plays MP3, FLAC, WAV, AIFF, Ogg Vorbis and M4A (AAC and ALAC) without gaps
+  between tracks (AAC leaves a short one, see [playback.md](docs/playback.md#known-limits)), with a queue,
   shuffle and repeat. The queue is still there after a restart, and you can choose
   the output device. A sleep timer stops the music at the end of a track, now or
   after 15 to 90 minutes.
@@ -27,11 +28,25 @@ A player for the music files on your own drives, for Windows 10 and newer and Li
   your files.
 - Favourites: like a track with the heart in a track list or the player bar, or a
   whole album from its menu. Liked tracks gather in a Favourites playlist, first
-  among your playlists, newest first, which you can play, shuffle or export.
+  among your playlists, newest first, which you can play, shuffle or export. With
+  Last.fm connected, your hearts can be loved there too, and the tracks you loved
+  on Last.fm can be brought into Favourites.
+- Exports a playlist as an M3U file for other players, phones or a backup, and
+  imports M3U playlists made elsewhere: their tracks are found in your library by
+  path, or by artist and title, and the import lists what it couldn't find.
+- A library check in Settings lists duplicate tracks, tracks with missing tags and
+  albums without a cover, so you can play, edit or look them up. It never deletes
+  anything.
+- Remembers what you play: how often and when each track was last played, and
+  when it came into your library, as columns you can turn on and sort by in Songs.
+  Settings can clear the history.
 - Finds missing album covers online (the Cover Art Archive, through MusicBrainz) and
   artist photos on fanart.tv. You can use your own pictures instead, and give
   playlists one too. An animated GIF, WebP or PNG plays on its album's, artist's or
   playlist's page.
+- Shows lyrics in the now playing view, from an `.lrc` file next to a song or from
+  its tags; synced lyrics follow the song, and a click on a line jumps there. If you
+  turn it on, lyrics are also looked up on LRCLIB.
 - Works with media keys and your system's media controls, shows what you play on
   Discord and scrobbles to Last.fm.
 - Has four themes (one light, three dark) with an accent colour to pick, reads

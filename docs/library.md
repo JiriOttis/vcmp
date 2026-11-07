@@ -28,8 +28,9 @@ instead, because nothing could rebuild them. The database runs in
 WAL mode, so one connection can scan while others read. Open one `Library` per
 thread.
 
-Labels (see [Labels](#labels)) and favourites (see [Favourites](#favourites)) live in
-the database only and never touch a file.
+Labels (see [Labels](#labels)), favourites (see [Favourites](#favourites)) and the
+play history (see [Play history](#play-history)) live in the database only and never
+touch a file.
 
 Music files are only read, except by `Library::write_tags`, the tag editor's write
 path (see [Writing tags](#writing-tags)), and `Library::accept_change_set` (see
@@ -37,7 +38,7 @@ path (see [Writing tags](#writing-tags)), and `Library::accept_change_set` (see
 
 ## Schema
 
-Version 13, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
+Version 17, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
 migrations; a database from a newer build is refused instead of being altered.
 Migrations run with foreign keys off (`Library::open` turns them on afterwards), so
 a migration that rebuilds a table, as version 12 rebuilds `change_sets` to widen
@@ -45,9 +46,9 @@ the CHECK on its kind, doesn't delete the rows that refer to it.
 
 | Table | Holds |
 |---|---|
-| `settings` | Key/value preferences: `library.auto_update`, `ui.theme` (the theme and accent as JSON; [ui.md](ui.md#themes)), `ui.reduced_motion` (`system`, `on` or `off`), `ui.setup_done` (the setup wizard was shown, or the library had folders when it came; [ui.md](ui.md#setup-wizard)) |
+| `settings` | Key/value preferences: `library.auto_update`, `library.added_backfilled` (the one-time backfill of added dates ran; see [Play history](#play-history)), `ui.theme` (the theme and accent as JSON; [ui.md](ui.md#themes)), `ui.reduced_motion` (`system`, `on` or `off`), `ui.setup_done` (the setup wizard was shown, or the library had folders when it came; [ui.md](ui.md#setup-wizard)), `ui.lyrics_shown` and `integrations.lyrics_online` (see [Lyrics](#lyrics)) |
 | `source_dirs` | Source directories (canonical path) and their `recursive` flag |
-| `tracks` | One row per file ever seen: path, size, mtime, `available`, format, tags, duration |
+| `tracks` | One row per file ever seen: path, size, mtime, `available`, format, tags, duration, and `added_ms`, when VCMP first saw it (see [Play history](#play-history)) |
 | `albums` | Album groups, their artist, year and artwork state, and whether the album is an artist's Unknown album (`unknown`, version 9) |
 | `artists` | Artist names (unique, case-insensitive) and MusicBrainz artist ID |
 | `cover_lookups` | What the online cover lookup found for an album (a release or release-group MBID, or nothing) and when, keyed by the album's group key so it survives rescans (version 2) |
@@ -67,6 +68,10 @@ the CHECK on its kind, doesn't delete the rows that refer to it.
 | `track_labels` | Which track holds which label, and since when; deleting a label deletes its rows (version 12) |
 | `change_labels` | The labels a label set creates when accepted, and whether it did or found one of that name (version 12) |
 | `favourites` | The tracks the owner liked, one row each, and when (version 13; see [Favourites](#favourites)) |
+| `not_duplicates` | Duplicate groups the owner marked "Not duplicates": one row per track, with a group id shared by the tracks marked together (version 14; see [Library check](#library-check)) |
+| `plays` | Every play that counted: track, when it started and the origin of the context it played from, indexed by track and time and by time (version 15; see [Play history](#play-history)) |
+| `lyrics_lookups` | What LRCLIB answered for a track (LRC text, plain text, or nothing), the question it answered (title, artist, album, duration in seconds) and when, keyed by source and track id (`local` and the library track id) rather than a reference (version 16; see [Lyrics](#lyrics)) |
+| `love_queue` | Loves and unloves waiting to be sent to Last.fm: artist, title and love or unlove, oldest first, one row per artist and title (version 17). A newer entry replaces the waiting one with a new id, so the one being sent as it is replaced isn't mistaken for it |
 
 Paths are stored as platform-native bytes (`src/path_codec.rs`), so file names that
 aren't valid UTF-8 keep working.
@@ -74,8 +79,8 @@ aren't valid UTF-8 keep working.
 ## Scanning
 
 1. **Discover.** Walk every source (only its top level when `recursive` is off) and
-   collect `.mp3`, `.flac`, `.ogg`/`.oga` and `.wav` files with their size and
-   modification time. A source that isn't a readable directory is reported as
+   collect `.mp3`, `.flac`, `.ogg`/`.oga`, `.wav`, `.aif`/`.aiff`/`.aifc` and `.m4a`
+   files with their size and modification time. `.mp4` files are never looked at. A source that isn't a readable directory is reported as
    unreachable.
 2. **Compare.**
    - An unchanged file (same size and mtime) is left alone; if it was unavailable, it
@@ -83,6 +88,9 @@ aren't valid UTF-8 keep working.
    - A changed file is re-read.
    - A file the database has but the disk doesn't is marked unavailable. Rows are
      never deleted, so playlists keep their entries.
+   - Once, on the first scan after schema version 15, the same transaction backfills
+     the added dates of the rows that existed before it (see
+     [Play history](#play-history)).
 3. **Read** new and changed files in path order on one reader thread, which runs
    ahead of the database writes (`write_as_received`: at most 200 files to a
    transaction).
@@ -93,8 +101,11 @@ aren't valid UTF-8 keep working.
      every file, was not saved. Re-reading files after a tag write reads them all
      first for the same reason.
    - The file type is detected from content, not the extension, so an Opus stream
-     named `.ogg` is skipped as unsupported. Unreadable files are skipped and listed
-     in the report.
+     named `.ogg` is skipped as unsupported. An `.m4a` file is stored as AAC or
+     ALAC, the codec lofty reads; one holding anything else (MP3, FLAC) or a video
+     track (a `vide` handler in `moov/trak/mdia/hdlr`, which VCMP reads itself since
+     lofty reads only the audio track) is skipped as unsupported. Unreadable files
+     are skipped and listed in the report.
    - The first file of each folder is read with its embedded cover, which sits next
      to the tags, so a new album's artwork costs no extra disk seek.
    - A new or changed file sends an album that already had art to step 7, which
@@ -150,7 +161,8 @@ translated.
 ## All tags
 
 Besides the fields VCMP shows, a scan stores every text item of the tag it reads
-(ID3v2 in MP3 and WAV, Vorbis comments in FLAC and Ogg Vorbis) in `track_tags`, and
+(ID3v2 in MP3, WAV and AIFF, Vorbis comments in FLAC and Ogg Vorbis, MP4 atoms in
+M4A) in `track_tags`, and
 `Library::track_tags` returns them. They are there for AI agents (see the
 [MCP spec](specs/2026-10-19-mcp-library-server.md)), which can find, for example,
 every track without a MusicBrainz ID: `Library::tag_keys` lists every key with how
@@ -162,15 +174,22 @@ key (with a value, when given) or lack it, a page at a time;
   name (`TrackTitle`, `Composer`, `MusicBrainzReleaseId`, `ReplayGainTrackGain`),
   the same in every format. Anything else keeps the format's own key behind a
   prefix: `id3:` and the frame ID, plus the frame's description after a colon where
-  it has one (`id3:TXXX:MY FIELD`, `id3:COMM:iTunNORM`, `id3:POPM:<email>`), or
-  `vorbis:` and the field name in capitals (`vorbis:MYFIELD`).
+  it has one (`id3:TXXX:MY FIELD`, `id3:COMM:iTunNORM`, `id3:POPM:<email>`),
+  `vorbis:` and the field name in capitals (`vorbis:MYFIELD`), or `mp4:` and the
+  atom: its four characters as lofty reads them (`mp4:stik`; byte `0xA9` is the
+  copyright sign, which many atom names start with) or, for a freeform atom, `----`,
+  its mean and its name (`mp4:----:com.apple.iTunes:MY FIELD`). An atom lofty has a
+  name for keeps that name even when it holds a number lofty's split leaves alone
+  (the integer `tmpo` is `IntegerBpm`).
 - **Values** are stored as the file holds them, untrimmed. A field with several
   values (Vorbis comments may repeat a field, ID3v2.4 separates values with a NUL)
   is one row per value, and `position` keeps the order. `TRCK` and `TPOS` split into
   number and total (`TrackNumber`, `TrackTotal`); one that isn't a number stays
-  whole under `TrackNumber`, so malformed values stay visible.
-- **What is left out:** pictures, binary frames (`PRIV`, `GEOB`, chapters) and a
-  file's other tags (ID3v1 and APE in an MP3, RIFF INFO in a WAV). A file without
+  whole under `TrackNumber`, so malformed values stay visible. An MP4 atom's
+  numbers and flags are listed in decimal (`mp4:stik` `1`).
+- **What is left out:** pictures, binary frames (`PRIV`, `GEOB`, chapters) and
+  atoms (binary data), and a file's other tags (ID3v1 and APE in an MP3, RIFF INFO
+  in a WAV, text chunks in an AIFF). A file without
   the tag VCMP reads stores the items of the tag its fields came from instead.
 - **Reading** goes through each format's own lofty type, not the probe's
   format-independent view: that view drops the items it has no name for.
@@ -200,15 +219,19 @@ Each file is written through a verified copy:
 2. Copy the file next to itself as `.<name>.<random>.vcmp-tmp`, with the same
    permissions. The name hides it from scans and file managers. A failure at any
    later step deletes the copy.
-3. Edit the tag VCMP reads in the copy: ID3v2 in MP3 and WAV, Vorbis comments in
-   FLAC and Ogg Vorbis. The tag is edited in place, so frames and fields the editor
+3. Edit the tag VCMP reads in the copy: ID3v2 in MP3, WAV and AIFF, Vorbis
+   comments in FLAC and Ogg Vorbis, MP4 atoms (`ilst`) in M4A. The tag is edited in
+   place, so frames, fields and atoms the editor
    doesn't know (comments, composer, lyrics, ReplayGain, MusicBrainz IDs, other
    pictures) are kept. An ID3v2.3 tag stays ID3v2.3 when that loses nothing. Taggers
    also put ID3v2.4 frames (full original and release dates) into ID3v2.3 tags, and
    ID3v2.3 can hold only the year of those, so such a tag is written as ID3v2.4.
    When the file has
    no such tag, it is created with what the scan read from the file's other tags, so
-   an MP3 with only ID3v1 loses no values.
+   an MP3 with only ID3v1 loses no values. In an M4A file the album artist is
+   `aART`, the year `©day`, and the cover the first picture of `covr`, since MP4
+   keeps no picture types: a new cover goes first, and removing the cover removes
+   the first picture.
 4. Read the copy back and compare:
    - every item, every `track_tags` entry and every picture of the written tag with
      what was meant to be written;
@@ -257,18 +280,21 @@ writes with.
   (`Popularimeter`, `Easy CD-DA Extractor|4|0`), and ID3v2 drops anything else.
 - **Refused before any file is touched** (`InvalidTagEdit`): a key that isn't one
   (`UnknownKey`), a key of the nine fields under any name (`ShownField`: `TrackTitle`,
-  `id3:TIT2`, `vorbis:ALBUMARTIST`), a key no kind of tag VCMP writes holds
-  (`UnwritableKey`: `AppleXid`, or a native key whose frame VCMP can't build such as
-  `id3:POPM:<email>` and `id3:TIPL:<role>`; clearing those works), a value with a
-  control character other than a line break or tab or an empty value, a value that
-  isn't a whole number for a key lofty keeps as a number (`TrackTotal`,
-  `MovementNumber`), and a value neither ID3v2 nor Vorbis comments keep
-  (`BadValue`).
-- **Refused for one file** (`TagWriteError::UnsupportedKey`): a native key of the
-  other kind of tag (`id3:` in a FLAC file), a common name the format has no field
-  for (ID3v2 has no `Lyrics`, only `UnsyncLyrics`), a value only the other kind keeps
-  (a rating as free text is kept in a FLAC file, not in an MP3), and two keys of one
-  edit that name the same tag.
+  `id3:TIT2`, `vorbis:ALBUMARTIST`, `mp4:©nam`), a native key whose frame VCMP
+  can't build (`UnwritableKey`: `id3:POPM:<email>` and `id3:TIPL:<role>`; clearing
+  those works), a value with a control character other than a line break or tab or
+  an empty value, a value that isn't a whole number for a key lofty keeps as a
+  number (`TrackTotal`, `MovementNumber`), and a value no kind of tag VCMP writes
+  keeps (`BadValue`). Every common name lofty knows has a place in ID3v2, Vorbis
+  comments or MP4 atoms, so none is refused as unwritable before the files are
+  known: `AppleXid`, an MP4 atom only, is refused for each MP3 or FLAC file.
+- **Refused for one file** (`TagWriteError::UnsupportedKey`): a native key of
+  another kind of tag (`id3:` in a FLAC file, `mp4:` in an AIFF), a common name the
+  format has no field for (ID3v2 has no `Lyrics`, only `UnsyncLyrics`), a value only
+  another kind keeps (a rating as free text is kept in a FLAC file, not in an MP3),
+  and two keys of one edit that name the same tag. An MP4 atom that holds numbers
+  in the file and is given something else (`mp4:stik` `music`), or that holds binary
+  data, fails that file with `TagWriteError::Write`.
 - **ID3v2.** A native key replaces its frames (by frame ID and description) with one
   new frame; several values are joined with NULs. A number or its total is written
   by VCMP into the frame holding both as `number/total` (`TRCK` for `TrackNumber`
@@ -285,6 +311,13 @@ writes with.
   two values of one key (an `ORIGINALDATE` and an `ORIGINALYEAR` are both
   `OriginalReleaseDate`), so every Vorbis edit, the nine fields' included, puts the
   fields it keeps back in their original order.
+- **MP4 atoms.** A native key replaces the atom with one holding the values, as
+  text, or as numbers or flags when the atom it replaces held those (players read
+  `tmpo` and `stik` only as numbers). A common name goes through lofty's generic
+  tag like ID3v2, for the atoms holding that key and the atom lofty writes it to
+  (a `trkn` without a total lists only the number, and a total goes into it), so
+  `trkn` and `disk` keep the part not edited. A number lofty's split leaves in its
+  atom (the integer `tmpo`) is replaced too, and written back as a number.
 
 `examples/edit_check.rs` copies a sample of a real collection into
 `target/edit-check/`, then edits every copy twice: once setting every field, a
@@ -381,6 +414,47 @@ accepted.
 - `Album::fetched_cover` says the artwork shown is a fetched cover.
   `Library::clear_fetched_cover` forgets it, together with the automatic lookup's
   result for the album, so that lookup may run again.
+
+## Lyrics
+
+`src/lyrics.rs` ([spec](specs/2026-11-07-lyrics-in-now-playing.md)). Lyrics are
+for the now playing view; nothing here writes a music file.
+
+- **Read when a track starts**, never at scan time (`read_local_lyrics`, called off
+  the UI thread by the app): the `.lrc` file of the same name (the track's path
+  with the extension `lrc` or `LRC`), and the tag VCMP reads. In ID3v2 (MP3, WAV):
+  SYLT frames timed in milliseconds (lofty keeps SYLT as binary data and parses it
+  on request) and USLT frames, those without a description first. In Vorbis
+  comments (FLAC, Ogg Vorbis): `LYRICS` and `UNSYNCEDLYRICS`. Plain lyrics are in
+  `track_tags` too, but the file is read again so one read always matches it.
+- **LRC** (`parse_lrc`): `[mm:ss]` to `[mm:ss.xxx]` stamps, several on one line
+  (the line repeats at each), `[offset:+/-ms]` (positive shows lines earlier),
+  other `[tag:value]` lines ignored, word stamps `<mm:ss.xx>` removed, and lines
+  without a stamp dropped. Text with at least one stamp counts as synced, wherever
+  it is: an `.lrc` file, USLT, `LYRICS`. A SYLT whose entries start new lines with a
+  line break and continue them without one (syllables) is joined into lines.
+- **`.lrc` files** are read up to 1 MiB, as UTF-8 (with or without a BOM), UTF-16
+  with a BOM, and otherwise Latin-1.
+- **Which lyrics show** (`choose_lyrics`): synced first, then plain, and within
+  each the `.lrc` file, then the tags, then LRCLIB. An `.lrc` file without stamps
+  is plain text and comes before the tags' plain text.
+- **LRCLIB** (`vcmp-integrations::lrclib`, behind "Find lyrics online",
+  `integrations.lyrics_online`, off unless set): asked only when nothing synced is
+  on disk and the track has an artist. Its exact `get` with the title, artist,
+  album (when there is one) and duration in whole seconds; LRCLIB matches the
+  duration within 2 s. A 404 or an instrumental record is "not found"; anything
+  else that isn't an answer is a failure, and a 429 waits at least for its
+  Retry-After. One request at a time, at least 300 ms apart; a lookup asked for
+  while another runs replaces any that waits.
+- **The cache** (`lyrics_lookups`, `Library::lyrics_lookup` and
+  `set_lyrics_lookup`): every answer, "not found" included, with the question it
+  answered. An answer counts only for that question, so a track whose title,
+  artist, album or duration changed (a tag edit, an agent's change, a rescan) is
+  looked up again (`lyrics_lookup_due`). "Not found" is asked again after 30 days
+  (`LYRICS_RETRY_NOT_FOUND`). Failures aren't stored; the app waits 10 minutes, or
+  the Retry-After, before asking again for that track. Rows are keyed by source
+  and id, so tracks of another source can use the table later; tracks are never
+  deleted, so rows are never orphaned.
 
 ## Animated pictures
 
@@ -491,7 +565,39 @@ tracks are searched separately.
   - `m3u_file_name` suggests the file name: the playlist's name with `<>:"/\|?*`
     and control characters replaced by `_`, trailing dots and spaces dropped, and
     `.m3u8`.
-  - Import is not built yet.
+- **M3U import** (`src/m3u.rs`, `Library::import_playlist`) makes a new, ordinary
+  playlist from a `.m3u` or `.m3u8` file, with no link back to it
+  (`docs/specs/2026-11-07-m3u-playlist-import.md`):
+  - **Reading:** the whole file is UTF-8 (a byte order mark is dropped) whatever its
+    extension; when it isn't valid UTF-8, the whole file is read as Windows-1252.
+    Lines end in `\n`, `\r\n` or `\r`. Every line that isn't blank and doesn't start
+    with `#` is an entry; the `#EXTINF:<seconds>,<text>` line before it gives its
+    length (a negative one is unknown; attributes after the length are skipped)
+    and its title. Other `#` lines are skipped.
+  - **By path first:** a `file:` URL is decoded; other URLs (`http://`,
+    `content://`) have no path. A path takes `/` and `\` alike, is resolved against
+    the playlist file's folder when relative, and has `.` and `..` resolved
+    without the filesystem. It matches the track stored at that path, available or
+    not, like `track_id_for_path`; failing that, a file that exists is looked up
+    again by its real path (letter case on Windows, links).
+  - **Then by tags:** an entry whose path gives no library track (gone, outside the
+    music folders, a URL) and that has an `#EXTINF` text is matched by it. The text
+    is split at the first " - " into artist and title, compared with every track's
+    artist and title after folding (lowercase, diacritics removed through Unicode
+    decomposition, one space between words); when that finds nothing, the whole
+    text is compared with titles alone, whatever the artist. Of several tracks,
+    the one whose length is closest to the entry's wins, however far; then an
+    available one; then the first in the library. The library's tags are read
+    once, on the first entry that needs them.
+  - **The playlist** holds the matched tracks in file order, repeats included, and
+    is named after the file without its extension (the caller's fallback name when
+    that is blank). A name another playlist has (ignoring case, as the database
+    does) gets " 2", " 3" and so on. The playlist and its entries are written in
+    one transaction. When nothing matched, or the file had no entries, nothing is
+    made.
+  - **`M3uImport`** says what was made (`playlist`, `name`), how many entries the
+    file had, and lists the unmatched ones (`M3uEntry`: location, `#EXTINF` text
+    and length) in file order.
 
 ## Labels
 
@@ -534,6 +640,81 @@ only. The agreed decisions are in the
   and `favourites_summary` (count, available count, duration, for the card).
 - **M3U export:** `Library::export_favourites` writes them newest first through the
   same writer as `export_playlist`.
+- **Last.fm import:** `like_at` likes tracks as of given times (Last.fm's love
+  dates); a track liked already keeps its own time, and an id that is no track is
+  skipped. `track_names` gives every track's id, artist and title, available or
+  not, for the tracks with an artist; the matching itself is
+  `vcmp_integrations::lastfm::match_loved` ([ui.md](ui.md#playback), "Last.fm
+  scrobbling").
+- **Love queue** (`src/loves.rs`): `queue_loves`, `queued_loves`,
+  `queued_love_count`, `remove_loves` and `clear_loves`, like the scrobble queue.
+  Loves hold the artist and title as they were, which is how Last.fm knows a track.
+
+## Library check
+
+`src/check.rs`. What the Library check page lists: duplicate tracks, tracks with
+missing tags and albums without a cover. The agreed decisions are in the
+[library check spec](specs/2026-11-07-library-check.md).
+
+- **Read-only.** Every query only reads. The one thing the module writes is the
+  "Not duplicates" marks; it never touches a music file. A test checks that the
+  queries and the marks leave every music file's bytes and modification time, and
+  every other table, as they were; another checks the module's source and the
+  page's glue reach for no file system call.
+- **Duplicates** (`Library::duplicate_groups`): available tracks with a track artist
+  and a title the file holds (not the file-name fallback). Title and artist are
+  folded in Rust (Unicode NFKD, the accents of the diacritical mark blocks dropped,
+  lower case, recomposed, runs of white space made one), since SQLite folds only
+  ASCII. Other marks stay, so the Japanese voicing marks keep "ga" apart from "ka". Tracks with the same folded pair
+  are sorted by length, and a group runs on while each track is at most 2 s longer
+  than the one before (`DUPLICATE_WINDOW`), so a group can span more than 2 s.
+  Groups of one are dropped; groups come by artist, then title.
+- **"Not duplicates"** (`mark_not_duplicates`) stores the group's track ids under a
+  new group id. A group the check finds is `hidden` while every one of its tracks is
+  in one stored group: a copy going missing keeps it hidden, a new copy shows it
+  again. `unmark_not_duplicates` forgets every stored group that holds all the
+  tracks given. Track ids outlive moved files, like favourites.
+- **Missing tags** (`missing_tags`): available tracks lacking a title, artist, album,
+  track number or year, grouped by album in library order (`AlbumGaps`). The title
+  is missing when `track_tags` holds no non-blank `TrackTitle` item: `tracks.title`
+  always has a value, the file name when the file holds no title. The other four
+  are their `tracks` columns being empty.
+- **Missing covers** (`albums_without_cover`): albums with available tracks, not an
+  Unknown album, whose artwork state says a scan looked and found none
+  (`artwork_state = 2`), and that have no fetched cover. Albums a scan hasn't looked
+  at yet are left out until one has.
+
+## Play history
+
+`src/plays.rs`. Every play that counted, kept in the database only. The agreed
+decisions are in the [play history spec](specs/2026-11-07-play-history.md).
+
+- **A log, not counters.** `plays` holds one row per play: the track id, when the
+  play started (Unix ms) and the origin of its context as the app named it
+  (`album:12`, `playlist:3`, `label:5`, `folder:<path>`, `search`, `songs`,
+  `favourites`), or NULL for a track from Up next. The origin is kept as text, so a
+  new kind of context needs no migration, and an id in it may no longer exist (a
+  deleted playlist). Counts and last played are worked out through the
+  `(track_id, played_ms)` index; nothing is cached on `tracks`.
+- **What counts** is decided by the app (Last.fm's rule, for every library track;
+  [ui.md](ui.md#play-history)). `Library::record_play` writes one row.
+- **Plays outlive files**, like playlist entries and favourites: they stay with a
+  track whose file is gone and follow a re-linked file.
+- **Reads:** `play_stats` (every played track's count and last play, over all time
+  or since a moment, for ranges such as "last month"), `track_play_stats` (one
+  track).
+- **Clearing** (`clear_play_history`) deletes every play and nothing else: the
+  scrobbles waiting for Last.fm, the added dates and the favourites stay.
+- **Added dates.** `tracks.added_ms` is set when the scanner first inserts a row.
+  Before play history every track of a library's first scan shared that scan's
+  time, so the first scan after migration 15 backfills the rows that existed
+  before it, once: each takes the earliest of its current value, its file's
+  modification time and, where the file system keeps one, its creation time. A date
+  only ever moves earlier, rows first seen in that same scan keep "now", and a row
+  whose file that scan doesn't find keeps its date. The scan records
+  `library.added_backfilled` in the same transaction, so it never runs again. SQL
+  can't read file dates, which is why this is in the scanner and not the migration.
+  `Track::added` exposes the date.
 
 ## Measured
 
@@ -589,6 +770,11 @@ cargo run --release -p vcmp-library --example scan_profile -- /path/to/music
 
 ## Known limits
 
+- Added dates of tracks already in the library before play history come from their
+  files: a library copied from elsewhere, or files VCMP or another program edited
+  (a tag write replaces the file), get the copy's or the edit's date. A track whose
+  file was missing at that first scan keeps its first-scan date, and with
+  "Update automatically" off the backfill waits for the next rescan.
 - CUE sheets aren't read: an album ripped as one file plus a `.cue` shows up as a
   single long track.
 - A folder image is noticed by its name, size and modification time. An image
@@ -603,11 +789,30 @@ cargo run --release -p vcmp-library --example scan_profile -- /path/to/music
 - Multi-value artist tags are joined with ", " into one artist name.
 - MP3 durations count whole frames, so they can be a fraction of a second longer
   than what plays.
-- Tag writing updates only the tag VCMP reads. An ID3v1 or APE tag in an MP3, or a
-  RIFF INFO list in a WAV file, keeps its old values, and players that prefer those
-  tags (Windows Explorer reads RIFF INFO in WAV files) show them.
+- Tag writing updates only the tag VCMP reads. An ID3v1 or APE tag in an MP3, a
+  RIFF INFO list in a WAV file, or the text chunks of an AIFF file keep their old
+  values, and players that prefer those tags (Windows Explorer reads RIFF INFO in
+  WAV files) show them.
+- MP4 keeps no picture types, so in an M4A file the cover is the first picture. A
+  file whose first picture is another picture (a back cover saved first) has that
+  picture replaced or removed by a cover edit.
+- lofty upgrades an old numeric `gnre` genre atom to a `©gen` text atom when it
+  reads an M4A file, so any write turns `gnre` into `©gen`; when the file has
+  both, the `gnre` atom is dropped. The scan lists the genre the same before and
+  after.
+- lofty writes an MP4 number with as few bytes as it needs, so a number atom VCMP
+  writes (`tmpo`, `stik`) may be shorter than the four bytes some players write.
+- An `.m4a` file holding chapter pictures as a video track (some enhanced podcasts)
+  may count as video and be skipped.
+- Tag writing on M4A files goes through lofty's least tested writer.
+  Run `examples/edit_check.rs` on copies of real files before relying on it; the
+  read-back check refuses to replace a file that reads back wrong.
 - A comment or lyrics frame VCMP writes gets the unknown language `XXX`, whatever
   language the frame it replaces had.
+- Lyrics: a SYLT frame timed in MPEG frames is ignored, and an `.lrc` file in an
+  encoding other than UTF-8, UTF-16 with a BOM or Latin-1 (Windows-1250, GBK)
+  shows wrong characters. Lyrics in an MP3's APE or ID3v1 tag aren't read, and
+  lyrics can't be searched.
 - ID3v2 keeps a total only behind its number. A total for an MP3 or WAV file
   without the number, or clearing a movement number while its total stays, would
   read back as the number 0, so the read-back check refuses that file
@@ -653,7 +858,23 @@ cargo run --release -p vcmp-library --example scan_profile -- /path/to/music
   is a folder on the system disk gives a relative path through that folder, which
   still works on this machine. Btrfs subvolumes count as separate filesystems, so
   a playlist saved in another subvolume than the music gets absolute paths.
+- M3U import reads a file that isn't UTF-8 as Windows-1252. A legacy file in
+  another code page (CP1250 for Czech, CP1251 for Cyrillic) gets wrong letters in
+  its paths and titles, so those entries match neither way. Saving the file as
+  `.m3u8` in the player that made it fixes that.
+- Tag matching lets the length only break ties, so a live or remastered version
+  with the same artist and title can stand in for the one the file meant, and the
+  import counts it as matched. An entry with a title alone matches that title by
+  any artist.
+- A path in other letter case than the file's matches on Windows, where the real
+  path gives the file's own case; on macOS it falls back to the tags.
 - Labels are in the database only. Deleting `library.sqlite3` (or losing it) loses
   every label, and nothing in the files can bring them back.
 - The owner's own label edits keep no history and can't be undone; only agents'
   label sets can.
+- The Library check folds accents by Unicode decomposition, so letters that don't
+  decompose ("o" with a stroke, the German sharp s) don't match their plain forms,
+  and live or remastered versions with the same title and artist within 2 s show as
+  duplicates until marked "Not duplicates". The same album in FLAC and MP3 already
+  merges into one album with doubled tracks, so each of its tracks shows as a
+  duplicate.

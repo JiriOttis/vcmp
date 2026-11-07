@@ -1,5 +1,6 @@
 #!/bin/sh
 # Regenerates the playback test fixtures. Needs ffmpeg with libmp3lame and libvorbis.
+# AAC and ALAC both go into `.m4a` files, so their names carry the codec as well.
 #
 # The reference signal is one second of 44.1 kHz stereo: a 440 Hz sine on the left
 # and a 660 Hz sine on the right, both at half amplitude. It is cut at frame 22433,
@@ -27,4 +28,7 @@ for p in a b; do
     part "tone-$p.flac" "$trim" -c:a flac
     part "tone-$p.mp3" "$trim" -c:a libmp3lame -b:a 192k
     part "tone-$p.ogg" "$trim" -c:a libvorbis -q:a 5
+    part "tone-$p.aiff" "$trim" -c:a pcm_s16be
+    part "tone-$p.alac.m4a" "$trim" -c:a alac
+    part "tone-$p.aac.m4a" "$trim" -c:a aac -b:a 192k
 done

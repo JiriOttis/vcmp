@@ -18,6 +18,7 @@ use vcmp_app::{Setup, updates};
 use vcmp_integrations::discord::{self, DiscordPresence};
 use vcmp_integrations::fanart::PhotoPicker;
 use vcmp_integrations::lastfm::Credentials;
+use vcmp_integrations::lrclib::LyricsFinder;
 use vcmp_integrations::musicbrainz::{CoverFinder, CoverPicker};
 use vcmp_library::Library;
 use vcmp_playback::{Player, PlayerOptions};
@@ -55,6 +56,9 @@ fn main() -> Result<(), slint::PlatformError> {
                         &paths,
                         Credentials::built_in(),
                     );
+                    if let Some(lastfm) = &lastfm {
+                        lastfm.attach(view.hearts());
+                    }
                     let tag_editor = TagEditor::connect(
                         &window,
                         library.clone(),
@@ -132,10 +136,24 @@ fn main() -> Result<(), slint::PlatformError> {
                             if let Some(lastfm) = &lastfm {
                                 service.set_scrobbler(Box::new(lastfm.clone()));
                             }
+                            // Asked only while "Find lyrics online" is on.
+                            service.set_lyrics_search(Box::new(LyricsFinder::start(
+                                |track, query, answer| {
+                                    PlayerService::post(move |service| {
+                                        service.lyrics_found(track, query, answer)
+                                    });
+                                },
+                            )));
                             let player = Rc::downgrade(&service);
                             cover_fetch.on_cover_changed(move |album| {
                                 if let Some(player) = player.upgrade() {
                                     player.artwork_changed(album);
+                                }
+                            });
+                            let player = Rc::downgrade(&service);
+                            view.check().on_play(move |tracks, origin, start| {
+                                if let Some(player) = player.upgrade() {
+                                    player.play_tracks(tracks, origin, start);
                                 }
                             });
                             let player = Rc::downgrade(&service);

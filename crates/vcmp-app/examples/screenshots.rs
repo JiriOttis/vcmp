@@ -32,11 +32,11 @@ use vcmp_app::themes::Themes;
 use vcmp_app::updates;
 use vcmp_app::{
     AgentState, AlbumTile, AppWindow, ArtworkState, ChangeEntry, ChangeField, ChangeGroup,
-    ChangeKind, ChangeProblem, ChangeRow, ChangeStatus, Confirmation, CoverSearch as CoverPicker,
-    CoverSearchStatus, LastfmState, LastfmStatus, PhotoSearch, PhotoSearchStatus, PlayerState,
-    ReduceMotion, ReviewStatus, SelectionChange, ServerStatus, Setup, SleepTimer, TagChange,
-    TagEditorState, TagEditorStatus, TagField, Theme, ThemeKind, Themes as ThemesState,
-    TrackSelection, UpdateState,
+    ChangeKind, ChangeProblem, ChangeRow, ChangeStatus, CheckTab, Confirmation,
+    CoverSearch as CoverPicker, CoverSearchStatus, LastfmState, LastfmStatus, LibraryCheck,
+    PhotoSearch, PhotoSearchStatus, PlayerState, ReduceMotion, ReviewStatus, SelectionChange,
+    ServerStatus, Setup, SleepTimer, TagChange, TagEditorState, TagEditorStatus, TagField, Theme,
+    ThemeKind, Themes as ThemesState, TrackSelection, UpdateState,
 };
 use vcmp_integrations::discord::Listening;
 use vcmp_integrations::musicbrainz::AlbumQuery;
@@ -59,6 +59,8 @@ struct Shot {
     tabs: usize,
     // The now playing view is open over the page.
     now_playing: bool,
+    // It shows synced lyrics, the third line playing.
+    lyrics: bool,
     // The Last.fm row in Settings, as in a build with an API key, in this state.
     lastfm: Option<LastfmStatus>,
     // A newer VCMP is reported, so its note shows.
@@ -87,6 +89,8 @@ struct Shot {
     setup: Option<i32>,
     // The window is tall enough for the whole Settings page.
     tall: bool,
+    // The Library check is open in place of Settings, on this tab.
+    check: Option<CheckTab>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -113,6 +117,7 @@ const fn shot(
         album,
         tabs,
         now_playing: false,
+        lyrics: false,
         lastfm: None,
         update: false,
         cover_picker: false,
@@ -127,6 +132,7 @@ const fn shot(
         queue_edge: false,
         setup: None,
         tall: false,
+        check: None,
     }
 }
 
@@ -207,6 +213,13 @@ const fn now_playing(name: &'static str, theme: &'static str) -> Shot {
     }
 }
 
+const fn lyrics(name: &'static str, theme: &'static str) -> Shot {
+    Shot {
+        lyrics: true,
+        ..now_playing(name, theme)
+    }
+}
+
 const fn lastfm(name: &'static str, theme: &'static str, status: LastfmStatus) -> Shot {
     Shot {
         lastfm: Some(status),
@@ -243,6 +256,14 @@ const fn setup(name: &'static str, theme: &'static str, step: i32) -> Shot {
         setup: Some(step),
         lastfm: Some(LastfmStatus::Disconnected),
         ..shot(name, theme, 1, None, 0)
+    }
+}
+
+/// The Library check on one of its tabs, over the library `VCMP_HOME` names.
+const fn check(name: &'static str, theme: &'static str, tab: CheckTab) -> Shot {
+    Shot {
+        check: Some(tab),
+        ..shot(name, theme, 7, None, 0)
     }
 }
 
@@ -286,6 +307,8 @@ const SHOTS: &[Shot] = &[
     queue_edge("queue-edge-dark", "dark"),
     now_playing("now-playing-light", "light"),
     now_playing("now-playing-dark", "dark"),
+    lyrics("now-playing-lyrics-light", "light"),
+    lyrics("now-playing-lyrics-dark", "dark"),
     sleep("sleep-timer-light", "light"),
     sleep("sleep-timer-dark", "dark"),
     cover_picker("cover-picker-light", "light"),
@@ -300,6 +323,12 @@ const SHOTS: &[Shot] = &[
     tags_waiting("tags-waiting-dark", "dark"),
     tags_confirm("tags-confirm-light", "light"),
     tags_confirm("tags-confirm-dark", "dark"),
+    check("check-duplicates-light", "light", CheckTab::Duplicates),
+    check("check-duplicates-dark", "dark", CheckTab::Duplicates),
+    check("check-tags-light", "light", CheckTab::MissingTags),
+    check("check-tags-dark", "dark", CheckTab::MissingTags),
+    check("check-covers-light", "light", CheckTab::MissingCovers),
+    check("check-covers-dark", "dark", CheckTab::MissingCovers),
     shot("settings-light", "light", 7, None, 0),
     shot("settings-dark", "dark", 7, None, 0),
     shot("settings-darker", "darker", 7, None, 0),
@@ -375,6 +404,19 @@ fn press(window: &AppWindow, key: Key) {
         .dispatch_event(WindowEvent::KeyReleased { text });
 }
 
+/// Stand-in synced lines for the lyrics shots.
+const LYRICS: &[&str] = &[
+    "Morning comes in slow and grey",
+    "Coffee cooling on the sill",
+    "Every song I meant to play",
+    "Waiting in the quiet still",
+    "",
+    "Turn it up and let it ring",
+    "Through the hallway, down the stairs",
+    "All the small and certain things",
+    "Humming softly everywhere",
+];
+
 fn prepare(window: &AppWindow, shot: &Shot) {
     window.global::<Confirmation>().invoke_answer(false);
     window
@@ -383,6 +425,17 @@ fn prepare(window: &AppWindow, shot: &Shot) {
     window.set_selected_index(shot.page);
     let player = window.global::<PlayerState>();
     player.set_now_playing_open(shot.now_playing);
+    // Set directly: the shots read no lyrics.
+    player.set_has_lyrics(shot.lyrics);
+    player.set_lyrics_shown(shot.lyrics);
+    player.set_lyrics_synced(shot.lyrics);
+    player.set_lyrics_lines(ModelRc::new(VecModel::from(
+        LYRICS
+            .iter()
+            .map(|line| SharedString::from(*line))
+            .collect::<Vec<_>>(),
+    )));
+    player.set_lyrics_current(if shot.lyrics { 2 } else { -1 });
     // Set directly, so no timer runs while the shots are taken.
     player.set_sleep_timer(if shot.sleep {
         SleepTimer::Timed
@@ -411,6 +464,14 @@ fn prepare(window: &AppWindow, shot: &Shot) {
         );
     } else {
         window.global::<UpdateState>().set_version("".into());
+    }
+    let library_check = window.global::<LibraryCheck>();
+    match shot.check {
+        Some(tab) => {
+            library_check.invoke_show();
+            library_check.set_tab(tab);
+        }
+        None => library_check.set_open(false),
     }
     if shot.cover_picker {
         show_cover_picker(window);
@@ -869,6 +930,7 @@ fn main() -> Result<(), slint::PlatformError> {
             player.handle_event(Event::TrackChanged(Some(NowPlaying {
                 entry: QueueEntry::new(TrackRef::local(track.path.to_string_lossy().as_ref())),
                 duration: Some(track.duration),
+                origin: None,
             })));
             player.handle_event(Event::StateChanged(PlaybackState::Playing));
             player.handle_event(Event::Position(track.duration / 3));

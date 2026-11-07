@@ -2,12 +2,13 @@ import { AboutSlint, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Button, Dropdown, FocusRing, ScrollArea, SearchField, SectionHeading, SegmentedChoice, SettingRow, TextLink, Toggle } from "components.slint";
 import { Setup } from "setup.slint";
+import { Confirmation } from "confirmation.slint";
 import { LibraryState } from "library-state.slint";
 import { AddFolderButton, LibrarySection } from "library-settings.slint";
-import { LastfmRow } from "lastfm-settings.slint";
-import { DiscordRow, MotionRow, ZoomRow } from "setting-rows.slint";
+import { LastfmImportRow, LastfmLoveRow, LastfmRow } from "lastfm-settings.slint";
+import { DiscordRow, LyricsOnlineRow, MotionRow, ZoomRow } from "setting-rows.slint";
 import { ThemeRows } from "themes.slint";
-import { LastfmState } from "lastfm-state.slint";
+import { LastfmState, LastfmStatus } from "lastfm-state.slint";
 import { PlayerState, ShuffleKind } from "player-state.slint";
 import { AlbumGrid, AlbumTile, CardGrid } from "album-grid.slint";
 import { AlbumDetail, AlbumView, TrackList, TrackRow } from "album-page.slint";
@@ -18,9 +19,11 @@ import { UpdateLink, UpdatesSection, UpdateState } from "updates.slint";
 import { PictureSlot } from "picture.slint";
 import { PlaylistDetail, PlaylistView } from "playlist-page.slint";
 import { Playlists } from "playlist-state.slint";
+import { PlaylistImport } from "playlist-import.slint";
 import { PhotoKeyRow, PhotoSearch } from "photo-picker.slint";
 import { AgentsSection } from "agents.slint";
 import { LabelFilter, LabelFilterPage, Labels, LabelsSection } from "labels.slint";
+import { LibraryCheck } from "library-check.slint";
 
 // Shared frame of Settings and About: title plus content in a column in the middle of
 // the page, fading in when the page is opened. The column takes 60 % of a wide page,
@@ -88,6 +91,19 @@ export component SettingsPage inherits Page {
 
     LibrarySection { }
 
+    // The Library check opens in place of Settings, as a page of its own.
+    if LibraryState.folders.length > 0: SettingRow {
+        title: @tr("Library check");
+        description: @tr("Finds duplicate tracks, tracks with missing tags and albums without a cover. It changes nothing by itself.");
+
+        Button {
+            text: @tr("Check library…");
+            clicked => {
+                LibraryCheck.show();
+            }
+        }
+    }
+
     VerticalLayout {
         spacing: Theme.space-xs;
 
@@ -148,7 +164,38 @@ export component SettingsPage inherits Page {
 
         if PlayerState.discord-available: DiscordRow { }
 
+        LyricsOnlineRow { }
+
         if LastfmState.available: LastfmRow { }
+
+        if LastfmState.available && LastfmState.status == LastfmStatus.connected: LastfmLoveRow { }
+
+        if LastfmState.available && LastfmState.status == LastfmStatus.connected: LastfmImportRow { }
+
+        SettingRow {
+            title: @tr("Play history");
+            description: @tr("The play counts and last played dates in Songs come from every play VCMP has counted.");
+
+            // Asks first, in a dialog (`Confirmation`).
+            Button {
+                property <bool> asked;
+                property <int> answers: Confirmation.answers;
+                changed answers => {
+                    if self.asked {
+                        self.asked = false;
+                        if Confirmation.accepted {
+                            PlayerState.clear-play-history();
+                        }
+                        self.focus();
+                    }
+                }
+                text: @tr("Clear play history…");
+                clicked => {
+                    self.asked = true;
+                    Confirmation.ask(@tr("Clear the play history?"), @tr("Every play count and last played date is deleted, and this can't be undone. Plays waiting to be scrobbled and the dates tracks were added stay."), @tr("Clear history"), @tr("Clear play history"), @tr("Keep the play history"));
+                }
+            }
+        }
     }
 
     // Only in builds that can search fanart.tv at all.
@@ -717,6 +764,8 @@ export component PlaylistsPage inherits Rectangle {
     callback activated(int);
     // Makes a playlist with this name and opens it.
     callback create(string);
+    // Asks for an M3U file and makes a playlist of it.
+    callback import-playlist();
     callback play(int, bool);
     callback queue-track(int, bool);
     callback remove-track(int);
@@ -733,9 +782,20 @@ export component PlaylistsPage inherits Rectangle {
         grid.focus-album(grid.current);
     }
 
+    // The import report is open over the page.
+    private property <bool> import-report: PlaylistImport.open;
+
     changed playlist-open => {
-        // A playlist just made opens with its name field focused instead.
-        if self.playlist-open && !view.renaming {
+        // A playlist just made opens with its name field focused instead, and one
+        // just imported keeps the focus in the report over it.
+        if self.playlist-open && !view.renaming && !PlaylistImport.open {
+            view.focus-back();
+        }
+    }
+    // The report closed over the playlist it made; over the grid, the Import
+    // playlist button takes the focus back itself.
+    changed import-report => {
+        if !self.import-report && root.playlist-open {
             view.focus-back();
         }
     }
@@ -764,11 +824,30 @@ export component PlaylistsPage inherits Rectangle {
                 horizontal-stretch: 1;
             }
 
-            if !root.library-failed: Button {
-                text: @tr("New playlist");
-                clicked => {
-                    root.create(Playlists.new-name);
-                    view.start-rename();
+            if !root.library-failed: HorizontalLayout {
+                spacing: Theme.space-m;
+                horizontal-stretch: 0;
+
+                // Short beside New playlist, so both fit the narrowest page.
+                Button {
+                    text: @tr("Import…");
+                    label: @tr("Import playlist…");
+                    property <bool> report: PlaylistImport.open;
+                    changed report => {
+                        if !self.report && !root.playlist-open {
+                            self.focus();
+                        }
+                    }
+                    clicked => {
+                        root.import-playlist();
+                    }
+                }
+                Button {
+                    text: @tr("New playlist");
+                    clicked => {
+                        root.create(Playlists.new-name);
+                        view.start-rename();
+                    }
                 }
             }
         }

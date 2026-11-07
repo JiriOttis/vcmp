@@ -26,7 +26,9 @@ const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
 
 /// Drops what the migrations after version 9 add, for tests that put a database back
 /// the way an older version left it.
-const TABLES_AFTER_VERSION_9: &str = "DROP TABLE favourites;
+const TABLES_AFTER_VERSION_9: &str = "DROP TABLE love_queue; DROP TABLE lyrics_lookups;
+    DROP TABLE plays; DROP TABLE not_duplicates;
+    DROP TABLE favourites;
     DROP TABLE change_labels; DROP TABLE track_labels;
     DROP TABLE labels; DROP TABLE change_values; DROP TABLE change_edits;
     DROP TABLE change_files; DROP TABLE change_sets; DROP TABLE track_tags;";
@@ -98,7 +100,7 @@ fn add_file(dir: &Path, name: &str, fixture: &str, tags: Tags) -> PathBuf {
 fn write_tags(path: &Path, tags: Tags) {
     let file = lofty::read_from_path(path).unwrap();
     let tag_type = match file.file_type() {
-        FileType::Wav => TagType::Id3v2,
+        FileType::Wav | FileType::Aiff => TagType::Id3v2,
         _ => file.primary_tag_type(),
     };
     let mut tag = Tag::new(tag_type);
@@ -152,7 +154,7 @@ fn png_in(colour: [u8; 3]) -> Vec<u8> {
 }
 
 #[test]
-fn reads_every_supported_format_and_skips_opus() {
+fn reads_every_supported_format_and_skips_the_others() {
     let mut setup = Setup::new();
     let album = setup.music().join("Album");
     for (index, (fixture, name)) in [
@@ -160,6 +162,9 @@ fn reads_every_supported_format_and_skips_opus() {
         ("silence.flac", "2.flac"),
         ("silence.ogg", "3.ogg"),
         ("silence.wav", "4.wav"),
+        ("silence.aiff", "5.aiff"),
+        ("silence.m4a", "6.m4a"),
+        ("silence-alac.m4a", "7.m4a"),
     ]
     .into_iter()
     .enumerate()
@@ -175,23 +180,35 @@ fn reads_every_supported_format_and_skips_opus() {
             },
         );
     }
-    fs::copy(
-        Path::new(FIXTURES).join("opus-in-ogg.ogg"),
-        album.join("opus.ogg"),
-    )
-    .unwrap();
+    for (fixture, name) in [
+        ("opus-in-ogg.ogg", "opus.ogg"),
+        ("video-in-m4a.m4a", "video.m4a"),
+        ("mp3-in-m4a.m4a", "mp3.m4a"),
+        // Never looked at: VCMP takes MP4 audio from `.m4a` files only.
+        ("silence.m4a", "audio.mp4"),
+    ] {
+        fs::copy(Path::new(FIXTURES).join(fixture), album.join(name)).unwrap();
+    }
     fs::write(album.join("notes.txt"), "not music").unwrap();
     setup.add_music_source();
 
     let report = setup.scan();
-    assert_eq!(report.added, 4);
-    assert_eq!(report.skipped.len(), 1);
-    assert!(report.skipped[0].path.ends_with("opus.ogg"));
-    assert!(
-        report.skipped[0].reason.contains("unsupported"),
-        "{}",
-        report.skipped[0].reason
-    );
+    assert_eq!(report.added, 7);
+    let mut skipped: Vec<_> = report
+        .skipped
+        .iter()
+        .map(|skipped| {
+            assert!(skipped.reason.contains("unsupported"), "{}", skipped.reason);
+            skipped
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    skipped.sort();
+    assert_eq!(skipped, ["mp3.m4a", "opus.ogg", "video.m4a"]);
 
     let tracks = setup.library.tracks().unwrap();
     let formats: Vec<_> = tracks.iter().map(|track| track.format).collect();
@@ -201,9 +218,19 @@ fn reads_every_supported_format_and_skips_opus() {
             Some(Format::Mp3),
             Some(Format::Flac),
             Some(Format::OggVorbis),
-            Some(Format::Wav)
+            Some(Format::Wav),
+            Some(Format::Aiff),
+            Some(Format::Aac),
+            Some(Format::Alac)
         ]
     );
+    let lossless: Vec<_> = tracks
+        .iter()
+        .filter_map(|track| track.format)
+        .filter(|format| format.is_lossless())
+        .map(Format::name)
+        .collect();
+    assert_eq!(lossless, ["FLAC", "WAV", "AIFF", "ALAC"]);
     for track in &tracks {
         // MP3 durations count whole frames including encoder padding (1.152 s here).
         assert!(
@@ -216,8 +243,27 @@ fn reads_every_supported_format_and_skips_opus() {
     }
     let albums = setup.library.albums().unwrap();
     assert_eq!(albums.len(), 1);
-    assert_eq!(albums[0].track_count, 4);
+    assert_eq!(albums[0].track_count, 7);
     assert_eq!(setup.library.artists().unwrap().len(), 1);
+}
+
+#[test]
+fn an_aiff_with_only_text_chunks_is_read() {
+    let mut setup = Setup::new();
+    let path = setup.music().join("track.aiff");
+    fs::create_dir_all(setup.music()).unwrap();
+    fs::copy(Path::new(FIXTURES).join("silence.aiff"), &path).unwrap();
+    let mut tag = Tag::new(TagType::AiffText);
+    tag.set_title("From a NAME chunk".into());
+    tag.set_artist("From an AUTH chunk".into());
+    tag.save_to_path(&path, WriteOptions::default()).unwrap();
+    setup.add_music_source();
+    setup.scan();
+
+    let track = &setup.library.tracks().unwrap()[0];
+    assert_eq!(track.format, Some(Format::Aiff));
+    assert_eq!(track.title, "From a NAME chunk");
+    assert_eq!(track.artist.as_deref(), Some("From an AUTH chunk"));
 }
 
 #[test]

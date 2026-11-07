@@ -359,6 +359,69 @@ CREATE TABLE favourites (
 
 CREATE INDEX favourites_liked ON favourites(liked_ms);
 "#,
+    r#"
+-- Duplicate groups the owner marked "Not duplicates" on the Library check page: one
+-- row per track, group_id shared by the tracks marked together. A group the check
+-- finds stays hidden while all its tracks are in one stored group; a track joining
+-- it shows it again. Tracks are never deleted, so the ids outlive moved files.
+CREATE TABLE not_duplicates (
+    group_id INTEGER NOT NULL,
+    track_id INTEGER NOT NULL REFERENCES tracks(id),
+    PRIMARY KEY (group_id, track_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX not_duplicates_track ON not_duplicates(track_id);
+"#,
+    r#"
+-- Play history: one row per play that counted (the Last.fm rule), with when it
+-- started (Unix time) and the app's key for the context it played from ("album:12",
+-- "playlist:3", "search", ...), or NULL for a track from Up next or no context. Plays
+-- point at tracks, which are never deleted, so they follow a moved file. Counts and
+-- last played are worked out from here; nothing is cached on tracks.
+CREATE TABLE plays (
+    id INTEGER PRIMARY KEY,
+    track_id INTEGER NOT NULL REFERENCES tracks(id),
+    played_ms INTEGER NOT NULL,
+    origin TEXT
+) STRICT;
+
+CREATE INDEX plays_track ON plays(track_id, played_ms);
+CREATE INDEX plays_time ON plays(played_ms);
+"#,
+    r#"
+-- What LRCLIB answered for a track, and to which question: its title, artist, album
+-- (NULL when it has none) and duration in whole seconds when it was asked. A
+-- different question (the tags changed) asks again. synced is LRC text, plain the
+-- text without times; both NULL when nothing was found. Keyed by where the track
+-- comes from ('local' and the library track id) rather than a reference, so tracks
+-- of other sources can use it too.
+CREATE TABLE lyrics_lookups (
+    source TEXT NOT NULL,
+    track TEXT NOT NULL,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    album TEXT,
+    duration_s INTEGER NOT NULL,
+    synced TEXT,
+    plain TEXT,
+    looked_up_ms INTEGER NOT NULL,
+    PRIMARY KEY (source, track)
+) STRICT;
+"#,
+    r#"
+-- Loves (love = 1) and unloves (love = 0) Last.fm has not received yet, oldest
+-- first. Like scrobbles they hold the artist and title as they were, which is how
+-- Last.fm knows a track. One entry per track: a newer one replaces it with a new id,
+-- so like-then-unlike sends only the unlove, and an entry being sent as it is
+-- replaced is not taken for the newer one.
+CREATE TABLE love_queue (
+    id INTEGER PRIMARY KEY,
+    artist TEXT NOT NULL,
+    title TEXT NOT NULL,
+    love INTEGER NOT NULL,
+    UNIQUE (artist, title)
+) STRICT;
+"#,
 ];
 
 pub(crate) const VERSION: i64 = MIGRATIONS.len() as i64;

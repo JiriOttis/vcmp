@@ -1,9 +1,11 @@
 //! Writing the tags beyond the nine fields [`TagEdit`] names, addressed by the keys
 //! [`TagEntry`] uses: lofty's common name (`Composer`), or the format's own key behind
-//! its prefix (`id3:TXXX:MY FIELD`, `vorbis:MYFIELD`).
+//! its prefix (`id3:TXXX:MY FIELD`, `vorbis:MYFIELD`, `mp4:----:com.apple.iTunes:MY
+//! FIELD`).
 //!
 //! What a key means depends on the file: a common name becomes an ID3v2 frame in an
-//! MP3 and a Vorbis comment field in a FLAC file. So every key is resolved per file to
+//! MP3, a Vorbis comment field in a FLAC file and an atom in an M4A file. So every key
+//! is resolved per file to
 //! the key the scan will list it under, by writing a sample value into an empty tag
 //! of the file's kind and reading it back. That makes "what was written" and "what
 //! reads back" the same thing, which the checks after writing rely on.
@@ -17,6 +19,7 @@ use lofty::id3::v2::{
     CommentFrame, ExtendedTextFrame, ExtendedUrlFrame, Frame, FrameId, Id3v2Tag,
     TextInformationFrame, UnsynchronizedTextFrame, UrlLinkFrame,
 };
+use lofty::mp4::{Atom, AtomData, AtomIdent, Ilst};
 use lofty::ogg::tag::VorbisComments;
 use lofty::tag::items::UNKNOWN_LANGUAGE;
 use lofty::tag::{ItemKey, ItemValue, MergeTag, SplitTag, TagItem, TagType};
@@ -67,6 +70,8 @@ pub(crate) enum Key {
     },
     /// A Vorbis comment field, in capitals.
     Vorbis(String),
+    /// An MP4 atom: four characters, or a freeform atom's mean and name.
+    Mp4(AtomIdent<'static>),
 }
 
 impl fmt::Display for Key {
@@ -79,8 +84,32 @@ impl fmt::Display for Key {
             } => write!(f, "id3:{id}:{description}"),
             Self::Id3 { id, .. } => write!(f, "id3:{id}"),
             Self::Vorbis(name) => write!(f, "vorbis:{name}"),
+            Self::Mp4(ident) => f.write_str(&tags::mp4_key(ident)),
         }
     }
+}
+
+/// An atom's name after `mp4:`: `----:<mean>:<name>` for a freeform atom, otherwise
+/// four Latin-1 characters without control characters (many start with the
+/// copyright sign).
+fn parse_atom(name: &str) -> Option<AtomIdent<'static>> {
+    if let Some(freeform) = name.strip_prefix("----:") {
+        let (mean, name) = freeform.split_once(':')?;
+        return (!mean.is_empty() && !name.is_empty()).then(|| AtomIdent::Freeform {
+            mean: Cow::Owned(mean.to_owned()),
+            name: Cow::Owned(name.to_owned()),
+        });
+    }
+    let bytes: Vec<u8> = name
+        .chars()
+        .map(|c| {
+            u8::try_from(c)
+                .ok()
+                .filter(|byte| !c.is_control() && *byte != 0)
+        })
+        .collect::<Option<_>>()?;
+    let fourcc: [u8; 4] = bytes.try_into().ok()?;
+    (fourcc != *b"----").then_some(AtomIdent::Fourcc(fourcc))
 }
 
 impl Key {
@@ -107,6 +136,9 @@ impl Key {
                     .all(|byte| (0x20..=0x7d).contains(&byte) && byte != b'=');
             return valid.then(|| Self::Vorbis(name.to_ascii_uppercase()));
         }
+        if let Some(name) = key.strip_prefix("mp4:") {
+            return parse_atom(name).map(Self::Mp4);
+        }
         ItemKey::VARIANTS
             .iter()
             .find(|item| tags::generic_key(**item) == key)
@@ -119,6 +151,7 @@ impl Key {
             Self::Common(_) => None,
             Self::Id3 { .. } => Some(Format::Mp3),
             Self::Vorbis(_) => Some(Format::Flac),
+            Self::Mp4(_) => Some(Format::Aac),
         }
     }
 }
@@ -151,7 +184,7 @@ pub(crate) fn check_key(key: &str, values: &[String]) -> Result<(), KeyProblem> 
     }
     let formats = match parsed.own_format() {
         Some(format) => vec![format],
-        None => vec![Format::Mp3, Format::Flac],
+        None => vec![Format::Mp3, Format::Flac, Format::Aac],
     };
     for value in values {
         let kept = formats.iter().any(|&format| {
@@ -163,7 +196,7 @@ pub(crate) fn check_key(key: &str, values: &[String]) -> Result<(), KeyProblem> 
             // when none has, the key is.
             return Err(match parsed {
                 Key::Common(item)
-                    if [TagType::Id3v2, TagType::VorbisComments]
+                    if [TagType::Id3v2, TagType::VorbisComments, TagType::Mp4Ilst]
                         .into_iter()
                         .any(|tag_type| item.map_key(tag_type).is_some()) =>
                 {
@@ -286,10 +319,25 @@ pub(crate) fn resolve(
     Ok(resolved)
 }
 
+/// The kinds of tag VCMP writes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TagKind {
+    Id3v2,
+    Vorbis,
+    Mp4,
+}
+
+fn tag_kind(format: Format) -> TagKind {
+    match format {
+        Format::Mp3 | Format::Wav | Format::Aiff => TagKind::Id3v2,
+        Format::Flac | Format::OggVorbis => TagKind::Vorbis,
+        Format::Aac | Format::Alac => TagKind::Mp4,
+    }
+}
+
 /// Whether files of both formats carry the same kind of tag.
 fn same_tag(a: Format, b: Format) -> bool {
-    let id3 = |format| matches!(format, Format::Mp3 | Format::Wav);
-    id3(a) == id3(b)
+    tag_kind(a) == tag_kind(b)
 }
 
 /// Writes `value` under `key` into an empty tag of the kind a file of `format` has,
@@ -297,16 +345,21 @@ fn same_tag(a: Format, b: Format) -> bool {
 fn probe(key: &Key, format: Format, value: &str) -> Option<Vec<TagEntry>> {
     let sample = [value.to_owned()];
     let edit = [(key, Some(&sample[..]))];
-    Some(match format {
-        Format::Mp3 | Format::Wav => {
+    Some(match tag_kind(format) {
+        TagKind::Id3v2 => {
             let mut tag = Id3v2Tag::new();
             apply_id3v2(&mut tag, &edit).ok()?;
             tags::id3v2_entries(&tag)
         }
-        Format::Flac | Format::OggVorbis => {
+        TagKind::Vorbis => {
             let mut tag = VorbisComments::default();
             apply_vorbis(&mut tag, &edit).ok()?;
             tags::vorbis_entries(&tag)
+        }
+        TagKind::Mp4 => {
+            let mut tag = Ilst::new();
+            apply_mp4(&mut tag, &edit).ok()?;
+            tags::mp4_entries(&tag)
         }
     })
 }
@@ -357,6 +410,7 @@ fn apply_id3v2(tag: &mut Id3v2Tag, edits: &[(&Key, Option<&[String]>)]) -> Resul
                 }
             }
             Key::Vorbis(_) => return Err(format!("{key} is a Vorbis comment field")),
+            Key::Mp4(_) => return Err(format!("{key} is an MP4 atom")),
         }
     }
     for pair in NUMBER_PAIRS {
@@ -531,12 +585,175 @@ fn apply_vorbis(
                 name.clone()
             }
             Key::Id3 { .. } => return Err(format!("{key} is an ID3v2 frame")),
+            Key::Mp4(_) => return Err(format!("{key} is an MP4 atom")),
         };
         for value in values.unwrap_or_default() {
             tag.push(field.clone(), value.clone());
         }
     }
     Ok(())
+}
+
+/// Applies resolved edits to an MP4 `ilst`.
+pub(crate) fn edit_mp4(tag: &mut Ilst, resolved: &[Resolved]) -> Result<(), String> {
+    apply_mp4(tag, &as_edits(resolved))
+}
+
+/// How an atom stores its values. Atoms holding numbers or flags keep doing so when
+/// VCMP writes them: players read `tmpo` or `stik` only as numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AtomKind {
+    Text,
+    Signed,
+    Unsigned,
+    Flag,
+}
+
+/// The kind of the values in `atom`; None when it holds binary data, which VCMP can't
+/// write.
+fn atom_kind(atom: &Atom<'_>) -> Option<AtomKind> {
+    let mut kind = AtomKind::Text;
+    for data in atom.data() {
+        kind = match data {
+            AtomData::UTF8(_) | AtomData::UTF16(_) => AtomKind::Text,
+            AtomData::SignedInteger(_) => AtomKind::Signed,
+            AtomData::UnsignedInteger(_) => AtomKind::Unsigned,
+            AtomData::Bool(_) => AtomKind::Flag,
+            AtomData::Picture(_) | AtomData::Unknown { .. } => return None,
+        };
+    }
+    Some(kind)
+}
+
+fn atom_value(kind: AtomKind, value: &str) -> Option<AtomData> {
+    Some(match kind {
+        AtomKind::Text => AtomData::UTF8(value.to_owned()),
+        AtomKind::Signed => AtomData::SignedInteger(value.parse().ok()?),
+        AtomKind::Unsigned => AtomData::UnsignedInteger(value.parse().ok()?),
+        AtomKind::Flag => AtomData::Bool(match value {
+            "0" => false,
+            "1" => true,
+            _ => return None,
+        }),
+    })
+}
+
+fn new_atom(
+    ident: AtomIdent<'static>,
+    kind: AtomKind,
+    values: &[String],
+    key: &str,
+) -> Result<Option<Atom<'static>>, String> {
+    let data = values
+        .iter()
+        .map(|value| atom_value(kind, value))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| match kind {
+            AtomKind::Flag => format!("{key} holds 0 or 1 in this file"),
+            _ => format!("{key} holds whole numbers in this file"),
+        })?;
+    Ok(Atom::from_collection(ident, data))
+}
+
+fn apply_mp4(tag: &mut Ilst, edits: &[(&Key, Option<&[String]>)]) -> Result<(), String> {
+    let mut common = Vec::new();
+    for &(key, values) in edits {
+        match key {
+            Key::Common(item) => common.push((*item, values)),
+            Key::Mp4(ident) => {
+                let name = key.to_string();
+                let kind = tag.get(ident).map_or(Some(AtomKind::Text), atom_kind);
+                if let Some(values) = values {
+                    let kind = kind.ok_or_else(|| format!("{name} holds data VCMP can't write"))?;
+                    tag.remove(ident).for_each(drop);
+                    if let Some(atom) = new_atom(ident.clone(), kind, values, &name)? {
+                        tag.insert(atom);
+                    }
+                } else {
+                    tag.remove(ident).for_each(drop);
+                }
+            }
+            Key::Id3 { .. } => return Err(format!("{key} is an ID3v2 frame")),
+            Key::Vorbis(_) => return Err(format!("{key} is a Vorbis comment field")),
+        }
+    }
+    if common.is_empty() {
+        return Ok(());
+    }
+    // As for ID3v2, the atoms holding an edited key go through lofty's generic form and
+    // back, so an atom holding two keys (`trkn` holds the track number and total)
+    // keeps the one not edited. Every other atom stays exactly as it was.
+    let names: Vec<String> = common
+        .iter()
+        .map(|(item, _)| tags::generic_key(*item))
+        .collect();
+    let holds_edited =
+        |atom: &Atom<'static>| tags::atom_keys(atom).iter().any(|key| names.contains(key));
+    // The atoms the edited keys are written to count too, whatever they list now: a
+    // `trkn` without a total lists only the number, and the total goes into it.
+    let targets: Vec<AtomIdent<'static>> = common
+        .iter()
+        .filter_map(|(item, _)| AtomIdent::try_from(item).ok().map(AtomIdent::into_owned))
+        .collect();
+    let affected: Vec<AtomIdent<'static>> = (&*tag)
+        .into_iter()
+        .filter(|atom| holds_edited(atom) || targets.contains(atom.ident()))
+        .map(|atom| atom.ident().clone().into_owned())
+        .collect();
+    let mut scratch = Ilst::new();
+    let mut kinds = Vec::new();
+    for ident in &affected {
+        for atom in tag.remove(ident).collect::<Vec<_>>() {
+            if let Some(kind @ (AtomKind::Signed | AtomKind::Unsigned)) = atom_kind(&atom) {
+                kinds.push((ident.clone(), kind));
+            }
+            scratch.insert(atom);
+        }
+    }
+    let (remainder, mut generic) = scratch.split_tag();
+    for &(item, values) in &common {
+        generic.remove_key(item);
+        for value in values.unwrap_or_default() {
+            if !generic.push(TagItem::new(item, ItemValue::Text(value.clone()))) {
+                return Err(format!("MP4 has no atom for {}", tags::generic_key(item)));
+            }
+        }
+    }
+    // What lofty's split leaves in an atom of an edited key (a number stored as an
+    // integer) is replaced by the edit too.
+    for atom in Ilst::from(remainder) {
+        if !holds_edited(&atom) && !targets.contains(atom.ident()) {
+            tag.insert(atom);
+        }
+    }
+    for atom in Ilst::from(generic) {
+        let kind = kinds
+            .iter()
+            .find(|(ident, _)| ident == atom.ident())
+            .map(|(_, kind)| *kind);
+        let atom = match kind {
+            Some(kind) => renumbered(atom, kind)?,
+            None => atom,
+        };
+        tag.insert(atom);
+    }
+    Ok(())
+}
+
+/// `atom` with its text values written as numbers of `kind`, as the atom it replaces
+/// held them; lofty's generic form writes them as text.
+fn renumbered(atom: Atom<'static>, kind: AtomKind) -> Result<Atom<'static>, String> {
+    let ident = atom.ident().clone().into_owned();
+    let key = tags::mp4_atom_key(&ident);
+    let data = atom
+        .into_data()
+        .map(|data| match data {
+            AtomData::UTF8(text) | AtomData::UTF16(text) => atom_value(kind, &text)
+                .ok_or_else(|| format!("{key} holds whole numbers in this file")),
+            other => Ok(other),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Atom::from_collection(ident, data).ok_or_else(|| format!("{key} has no values"))
 }
 
 /// The fields of Vorbis comments, in order.
@@ -668,4 +885,77 @@ fn touched_by_fields(edit: &TagEdit, key: &str) -> bool {
                 || is(ItemKey::Year)
                 || matches!(key, "id3:TDRC" | "id3:TYER" | "id3:TDAT" | "id3:TIME")))
         || (!edit.genre.is_keep() && is(ItemKey::Genre))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set(values: &[&str]) -> FieldEdit<Vec<String>> {
+        FieldEdit::Set(values.iter().map(|value| (*value).to_owned()).collect())
+    }
+
+    #[test]
+    fn mp4_keys_parse_and_print_back() {
+        for key in [
+            "mp4:----:com.apple.iTunes:MY FIELD",
+            "mp4:----:com.example:a:b",
+            "mp4:stik",
+            "mp4:\u{a9}xyz",
+        ] {
+            let parsed = Key::parse(key).map(|parsed| parsed.to_string());
+            assert_eq!(parsed.as_deref(), Some(key));
+        }
+        for key in [
+            "mp4:",
+            "mp4:abc",
+            "mp4:abcde",
+            "mp4:----",
+            "mp4:----:mean",
+            "mp4:----::name",
+            "mp4:ab\u{1}c",
+            "mp4:\u{100}abc",
+        ] {
+            assert_eq!(Key::parse(key), None, "{key}");
+        }
+    }
+
+    #[test]
+    fn an_mp4_key_resolves_to_the_name_it_reads_back_under() {
+        // `(c)wrt` is the composer, `(c)nam` the title.
+        let edit = BTreeMap::from([("mp4:\u{a9}wrt".to_owned(), set(&["Native"]))]);
+        let resolved = resolve(&edit, Format::Alac, false).unwrap();
+        assert_eq!(resolved[0].name, "Composer");
+        assert!(matches!(
+            check_key("mp4:\u{a9}nam", &[]),
+            Err(KeyProblem::Shown)
+        ));
+        // An MP4 atom has no place in an ID3v2 tag.
+        let edit = BTreeMap::from([("mp4:stik".to_owned(), set(&["1"]))]);
+        assert_eq!(resolve(&edit, Format::Aiff, false).unwrap_err(), "mp4:stik");
+    }
+
+    #[test]
+    fn losing_an_mp4_freeform_atom_fails_the_check() {
+        let entry = |key: &str, value: &str| TagEntry {
+            key: key.to_owned(),
+            value: value.to_owned(),
+        };
+        let before = [
+            entry("TrackTitle", "Old"),
+            entry("mp4:----:com.example:Mood", "calm"),
+        ];
+        let edit = TagEdit {
+            title: FieldEdit::Set("New".into()),
+            ..TagEdit::default()
+        };
+        let kept = [
+            entry("TrackTitle", "New"),
+            entry("mp4:----:com.example:Mood", "calm"),
+        ];
+        assert_eq!(check(&before, &kept, &edit, &[], false), Ok(()));
+        let lost = [entry("TrackTitle", "New")];
+        let error = check(&before, &lost, &edit, &[], false).unwrap_err();
+        assert!(error.contains("mp4:----:com.example:Mood"), "{error}");
+    }
 }

@@ -77,11 +77,29 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
       image editor: the new cover shows.
 - [ ] Remove a music folder: its albums go, and playlist entries from it stay,
       dimmed.
+- [ ] Settings → Library check → Check library…: the page opens with three tabs and
+      their counts. Back, Escape, the mouse's back button and the Settings entry in
+      the sidebar all return to Settings; the forward button opens the check again.
+- [ ] Copy a track into a second folder (on a `VCMP_HOME` library of copies): it
+      shows under Duplicates with both paths. Play plays both, one after the other.
+      Not duplicates hides the group; the switch shows it again, and Show again
+      brings it back. Copy it a third time: the group shows again with three.
+- [ ] Missing tags: a track without a title tag shows "No title" (its file name as
+      the title). The album block's Edit tags… opens the editor for the listed
+      tracks; save a year, and the tracks leave the list.
+- [ ] Missing covers: Find cover online opens the picker over the page; pick a
+      cover and the album leaves the list.
+- [ ] Show in the file manager opens the file manager with the file selected
+      (on Linux, try Nautilus or Dolphin; another file manager may open the folder
+      only).
 
 ### Playback
 
 - [ ] An album plays through without a gap between tracks (a live or concept album
-      makes a gap easy to hear). MP3, FLAC, WAV and Ogg Vorbis all play.
+      makes a gap easy to hear). MP3, FLAC, WAV, AIFF, Ogg Vorbis and M4A (ALAC
+      and AAC) all play. An AAC album has short gaps (a known limit, see
+      docs/playback.md); an ALAC or AIFF album has none.
+- [ ] A folder with an `.m4a` music video, or an `.mp4` file: neither is listed.
 - [ ] Spin the mouse wheel fast (a free-spinning wheel, if you have one) on Albums,
       Songs and a long album: the page scrolls at once and glides to a stop, with
       no freeze. A touchpad still flicks.
@@ -91,9 +109,9 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
       it, a notch at a time, also with a free-spinning wheel and a touchpad. Over
       the position slider the wheel doesn't seek. Restart: the volume set by wheel
       is kept.
-- [ ] Play a FLAC or WAV file: a small waveform mark follows the artist in the
-      player bar, and pointing at it says "Lossless (FLAC)". An MP3 or Ogg file has
-      none. With Last.fm connected, a longer track shows the Last.fm mark, which
+- [ ] Play a FLAC, WAV, AIFF or ALAC file: a small waveform mark follows the
+      artist in the player bar, and pointing at it says "Lossless (FLAC)" (or
+      "Lossless (ALAC)", ...). An MP3, Ogg or AAC file has none. With Last.fm connected, a longer track shows the Last.fm mark, which
       turns to a tick once half of it (or 4 minutes) has played.
 - [ ] Shuffle, "Fewer repeats" and "Fully random": no track comes back before the
       rest have played with Fewer repeats.
@@ -121,6 +139,44 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
       the default, and Settings names the device playing instead. Plug it back: on
       Linux with a sound server, sound returns to it within half a second
       **(never seen working with a real device)**; elsewhere, choose it again.
+
+### Lyrics
+
+Use copies of your music or a `VCMP_HOME` library; nothing is written to the files,
+but the `.lrc` files below are yours to add and remove.
+
+- [ ] Next to a copied FLAC, add `song.lrc` with timed lines (`[00:05.00]...`).
+      Play it: the player bar's lyrics button is enabled. Press it: now playing
+      opens on the lyrics, the line playing in the accent and kept in the middle;
+      lines change on the beat, not a quarter second late. Press it again: the view
+      closes.
+- [ ] Click a line: playback jumps to it. Tab to the lines, Up/Down moves a focus
+      ring, Enter plays from that line. Seek with the bar's slider and pause: the
+      highlight follows and stops.
+- [ ] Reduce motion on: the list jumps to each new line instead of gliding.
+- [ ] Turn the view's lyrics button off, close and reopen now playing, restart VCMP:
+      the view stays on the cover. Turn it on: it stays on the lyrics for every
+      track that has lyrics; a track without any shows the cover and no button, and
+      the bar's button is greyed.
+- [ ] An MP3 with SYLT (synced) lyrics from a tagger (Mp3tag, foobar2000,
+      MusicBrainz Picard with a lyrics plugin), and one with USLT holding LRC text:
+      both show synced. A file with plain USLT or `LYRICS`: the text scrolls, with
+      Up/Down and Page Up/Down from the keyboard too.
+- [ ] An `.lrc` saved as UTF-8 with accents and one as UTF-16 (Notepad's
+      "UTF-16 LE"): both read correctly.
+- [ ] Settings and the setup wizard's Online services step both have "Find lyrics
+      online". With it off, nothing reaches lrclib.net (watch with a proxy or the
+      log at `RUST_LOG=info`).
+- [ ] With it on, play a well-known track without lyrics on disk: synced lyrics
+      appear a moment after it starts, and the view switches to them if it was
+      open on lyrics. Play it again offline: they are still there.
+- [ ] A track LRCLIB doesn't know: no lyrics, and playing it again doesn't ask
+      again (log). Edit its title in the tag editor to the right one: it is asked
+      again and the lyrics appear. **(never seen working with real tracks)**
+- [ ] A track with plain lyrics in its tags and "Find lyrics online" on: the plain
+      text shows at once and gives way to LRCLIB's synced lyrics when they come.
+- [ ] Player bar at 720 px wide: all buttons, the volume slider and
+      the track's title fit without overlapping.
 
 ### Selecting and playing tracks
 
@@ -167,14 +223,19 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
       each changed field, and writes only after "Write N files". A second Enter,
       Back and Escape return to the form with your values; one track still writes
       at once.
-- [ ] Change and remove the embedded cover.
+- [ ] Change and remove the embedded cover, also of an M4A (AAC and ALAC) and an
+      AIFF file. iTunes or Music, foobar2000 and Mp3tag show the new tags and cover
+      of an M4A file the editor wrote.
 - [ ] Edit the track that is playing.
 - [ ] Make a file read-only, then save: the editor names the file and the reason,
       and Try again works once it's writable.
 - [ ] On each platform, run `cargo run --release -p vcmp-library --example
       edit_check -- <music dir> 40` against your collection. It edits copies only,
       every other tag included, and should end with "0 failed edits"; each failure
-      it prints names the file and the tag.
+      it prints names the file and the tag. Before merging the M4A and AIFF
+      support, run it on a collection with real M4A (AAC and ALAC, iTunes
+      purchases and rips) and AIFF files: MP4 tag writing is lofty's least tested
+      path.
 
 ### Playlists
 
@@ -206,6 +267,29 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
     the paths are absolute.
   - Copy the music folder with the exported file in it to a phone, and open the
     playlist in its player: the relative paths find the files.
+- [ ] **(never seen working)** Import… on the Playlists page (a screen reader says
+      "Import playlist…") opens the file dialog for `.m3u` and `.m3u8`. Use a
+      `VCMP_HOME` library of copied files. On each of Windows, Linux and macOS:
+  - Import both files exported above: each comes back as a new playlist named
+    after the file, with " 2" (then " 3") when that name is taken, the same
+    entries in the same order, the track that is there twice included, and no
+    dialog.
+  - A playlist saved by VLC (Media → Save Playlist to File, `.m3u` and `.m3u8`;
+    VLC writes `file:///` URLs) and one saved by foobar2000 on Windows: every
+    entry that is in the library comes in.
+  - A playlist exported from a phone's player: its paths point at the phone, so
+    entries come in by their `#EXTINF` artist and title; the dialog lists those
+    that didn't, each with its title and, smaller, its path. Arrows, Page Up/Down,
+    Home and End scroll a long list; Escape, Close or a click beside it closes it,
+    and the playlist is there behind it.
+  - An old `.m3u` saved by a Windows player with accented names (é, ü): its
+    entries come in. One with Czech names (ř, ů) saved in CP1250 doesn't fully:
+    the known limit in `docs/library.md`.
+  - A file with nothing from the library (or an empty one): no playlist is made,
+    the dialog says "No playlist was imported", and closing it puts the focus back
+    on Import….
+  - A 720 px wide window: Import… and New playlist stay beside the title, inside
+    the window.
 
 ### Labels
 
@@ -263,6 +347,35 @@ Use an empty `VCMP_HOME`, such as `VCMP_HOME=target/first-start cargo run -p vcm
       found", and comes back with the folder.
 - [ ] A 720 px wide window with a long title playing: the bar's heart and buttons
       all stay inside.
+
+### Play history **(never seen working)**
+
+- [ ] Fresh `VCMP_HOME`: Songs shows Title, Artist, Album, Year and Time. Right-click
+      a heading: a menu lists every column but Title, with checks on the ones shown.
+      Turn on Plays, Last played and Added: they appear after Time, and Added reads
+      "Today" for every track. Tab to a heading and press the Menu key (or
+      Shift+F10): the same menu opens.
+- [ ] Hide Artist: the edge after Title now resizes Title against Album. Hide
+      Album too: no edge is left, and Title takes the room. Restart: the same
+      columns show, and the widths come back when Artist and Album do.
+- [ ] Play a track for over half its length (or 4 minutes): its row's Plays turns
+      to 1 and Last played to "Today" without leaving the page. Skip another after
+      a few seconds, and seek far into a third: neither counts. A track with no
+      artist tag counts too. With Last.fm connected, a track with an artist is
+      scrobbled as before; with Last.fm disconnected, plays still count.
+- [ ] Sort by Plays, then again: most played first, never played last both ways.
+      Sort by Plays, then hide Plays: the table goes back to Title order.
+- [ ] Turn on Repeat One and let a track play twice: Plays goes up by two.
+- [ ] An existing library from before this version (copy a `VCMP_HOME`): after the
+      first scan, Added shows dates from the files, not the day of the first scan;
+      edit a track's mtime later and rescan: its date doesn't change again.
+- [ ] Leave Songs open over midnight with Last played shown: "Today" turns into
+      "Yesterday" within a minute; the same after the computer slept through it.
+- [ ] Settings, Playback, "Clear play history…": the dialog says what is lost.
+      Keep: nothing changes. Clear: every Plays is 0 and Last played empty; Added
+      stays, and plays waiting for Last.fm are still sent.
+- [ ] A 720 px window with every Songs column turned on: note how the text columns
+      fit; hiding a few gives them room back.
 
 ### Covers and artist photos
 
@@ -395,6 +508,21 @@ animated WebP and an APNG. For album covers, edit copies only.
       scrobble. **(never seen working with a real account)**
 - [ ] Last.fm offline: play a few tracks without network, reconnect: the plays
       arrive. Revoke VCMP's access on last.fm: the row asks to connect again.
+- [ ] Love on Last.fm (build with the keys, an account connected): the switch is
+      off; heart a track and nothing shows on last.fm. Switch it on, heart another:
+      it shows as loved on your last.fm profile. Take the heart away: it is no
+      longer loved there. An album's "Add to Favourites" loves each of its tracks.
+      **(never seen working with a real account)**
+- [ ] Loves offline: with the switch on and no network, heart two tracks: the row
+      says "2 loves and unloves wait to be sent". With the network back they arrive
+      (within the backoff, at most 30 minutes).
+- [ ] Import loved tracks from Last.fm, on an account with more than 200 loved
+      tracks: the row counts pages ("page 2 of 3…") and the button is disabled;
+      afterwards it says how many are in Favourites and how many matched nothing.
+      The new hearts show at once, ordered by their love dates in Favourites, and
+      nothing new is loved on last.fm. Running it again adds nothing new.
+      **(never seen working with a real account; checks that 200 a page is
+      accepted)**
 - [ ] Update check: once the repository is public and has a release newer than the
       build, the sidebar and About show "VCMP x.y.z is available" and open its
       page; turning the setting off hides it. While the repository is private the
@@ -540,6 +668,9 @@ Use a library of copied files (`VCMP_HOME`, see CLAUDE.md): accepting writes tag
       with `vcmp.exe` and `mcp` lists vcmp's tools. **(never seen working)**
 - [ ] Last.fm keeps its key in Credential Manager across restarts.
 - [ ] Output device list shows the WASAPI device names.
+- [ ] Library check: Show in the file manager opens Explorer with the file
+      selected, for a path with spaces and one with accented letters.
+      **(never seen working)**
 - [ ] The `windows-x64.zip` from a release unpacks and `vcmp.exe` starts without
       a console window, after SmartScreen's More info → Run anyway.
 - [ ] The same for a `windows-x64.zip` from `packaging/release-local.sh`, built with
@@ -587,6 +718,8 @@ Use a library of copied files (`VCMP_HOME`, see CLAUDE.md): accepting writes tag
 - [ ] Claude Desktop with the entry Settings shows (`VCMP.app/Contents/MacOS/...`
       and `mcp`) lists vcmp's tools. **(never seen working)**
 - [ ] Last.fm keeps its key in the Keychain across restarts.
+- [ ] Library check: Show in the file manager reveals the file in the Finder.
+      **(never seen working)**
 - [ ] The `macos-arm64.zip` (or `macos-x64.zip`) unpacks to `VCMP.app`, which
       starts after System Settings → Privacy & Security → Open Anyway, and shows
       its icon.

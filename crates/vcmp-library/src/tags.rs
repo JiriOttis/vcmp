@@ -4,6 +4,7 @@
 //! Besides the fields VCMP shows, a read lists every text item of the tag VCMP reads
 //! as [`TagEntry`] values, so the database holds what the file says in full.
 
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
@@ -12,7 +13,9 @@ use lofty::error::FileParseError;
 use lofty::file::{AudioFile, FileType, TaggedFile, TaggedFileExt};
 use lofty::flac::FlacFile;
 use lofty::id3::v2::{Frame, Id3v2Tag};
+use lofty::iff::aiff::AiffFile;
 use lofty::iff::wav::WavFile;
+use lofty::mp4::{Atom, AtomData, AtomIdent, Ilst, Mp4Codec, Mp4File};
 use lofty::mpeg::MpegFile;
 use lofty::ogg::VorbisFile;
 use lofty::ogg::tag::VorbisComments;
@@ -20,35 +23,42 @@ use lofty::picture::PictureType;
 use lofty::probe::Probe;
 use lofty::tag::{Accessor, ItemKey, ItemValue, SplitTag, Tag, TagType};
 
-/// Audio formats VCMP plays.
+/// Audio formats VCMP plays. AAC and ALAC are the two codecs VCMP plays in an MP4
+/// (`.m4a`) file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Format {
     Mp3,
     Flac,
     OggVorbis,
     Wav,
+    Aiff,
+    Aac,
+    Alac,
 }
 
 impl Format {
-    pub(crate) fn from_extension(path: &Path) -> Option<Self> {
-        let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-        match ext.as_str() {
-            "mp3" => Some(Self::Mp3),
-            "flac" => Some(Self::Flac),
-            "ogg" | "oga" => Some(Self::OggVorbis),
-            "wav" => Some(Self::Wav),
-            _ => None,
-        }
-    }
+    const ALL: [Self; 7] = [
+        Self::Mp3,
+        Self::Flac,
+        Self::OggVorbis,
+        Self::Wav,
+        Self::Aiff,
+        Self::Aac,
+        Self::Alac,
+    ];
 
-    fn from_file_type(file_type: FileType) -> Option<Self> {
-        match file_type {
-            FileType::Mpeg => Some(Self::Mp3),
-            FileType::Flac => Some(Self::Flac),
-            FileType::Vorbis => Some(Self::OggVorbis),
-            FileType::Wav => Some(Self::Wav),
-            _ => None,
-        }
+    /// Whether the scanner looks at a file with this name. Which format it holds, if
+    /// any VCMP plays, is known only once the file is read: an `.m4a` file may hold
+    /// AAC or ALAC.
+    pub(crate) fn is_candidate(path: &Path) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                matches!(
+                    ext.to_ascii_lowercase().as_str(),
+                    "mp3" | "flac" | "ogg" | "oga" | "wav" | "aif" | "aiff" | "aifc" | "m4a"
+                )
+            })
     }
 
     pub(crate) fn as_str(self) -> &'static str {
@@ -57,12 +67,16 @@ impl Format {
             Self::Flac => "flac",
             Self::OggVorbis => "ogg-vorbis",
             Self::Wav => "wav",
+            Self::Aiff => "aiff",
+            Self::Aac => "aac",
+            Self::Alac => "alac",
         }
     }
 
-    /// The audio is stored without loss: FLAC and WAV, not MP3 or Vorbis.
+    /// The audio is stored without loss: FLAC, WAV, AIFF and ALAC, not MP3, Vorbis or
+    /// AAC.
     pub fn is_lossless(self) -> bool {
-        matches!(self, Self::Flac | Self::Wav)
+        matches!(self, Self::Flac | Self::Wav | Self::Aiff | Self::Alac)
     }
 
     /// The name people know the format by, such as "FLAC".
@@ -72,13 +86,14 @@ impl Format {
             Self::Flac => "FLAC",
             Self::OggVorbis => "Ogg Vorbis",
             Self::Wav => "WAV",
+            Self::Aiff => "AIFF",
+            Self::Aac => "AAC",
+            Self::Alac => "ALAC",
         }
     }
 
     pub(crate) fn parse(text: &str) -> Option<Self> {
-        [Self::Mp3, Self::Flac, Self::OggVorbis, Self::Wav]
-            .into_iter()
-            .find(|format| format.as_str() == text)
+        Self::ALL.into_iter().find(|format| format.as_str() == text)
     }
 }
 
@@ -104,8 +119,10 @@ pub struct TagEntry {
     /// lofty's format-independent name when the item has one (`Composer`,
     /// `MusicBrainzReleaseId`), otherwise the format's own key behind its prefix:
     /// `id3:` and the frame ID, with the description after another colon where the
-    /// frame has one (`id3:TXXX:MY FIELD`, `id3:COMM:iTunNORM`), or `vorbis:` and
-    /// the field name in capitals (`vorbis:MYFIELD`).
+    /// frame has one (`id3:TXXX:MY FIELD`, `id3:COMM:iTunNORM`), `vorbis:` and the
+    /// field name in capitals (`vorbis:MYFIELD`), or `mp4:` and the atom's four
+    /// characters or, for a freeform atom, `----`, its mean and its name
+    /// (`mp4:stik`, `mp4:----:com.apple.iTunes:MY FIELD`).
     pub key: String,
     /// The value as the file holds it, untrimmed. A field with several values gives
     /// one entry per value.
@@ -135,43 +152,65 @@ pub(crate) fn read(path: &Path, with_cover: bool) -> Result<ReadTrack, String> {
     let file_type = probe
         .file_type()
         .ok_or_else(|| "unreadable: the audio format could not be determined".to_owned())?;
-    let format = Format::from_file_type(file_type)
-        .ok_or_else(|| format!("unsupported audio format ({file_type:?})"))?;
     // Each format is read as its own type rather than through the probe: only the
     // format's own tag still holds the items lofty has no common name for.
     let mut reader = probe.into_inner();
-    let (file, native_entries): (TaggedFile, Option<Vec<TagEntry>>) = match format {
-        Format::Mp3 => {
-            let file = MpegFile::read_from(&mut reader, options).map_err(unreadable)?;
-            let entries = file.id3v2().map(id3v2_entries);
-            (file.into(), entries)
-        }
-        Format::Wav => {
-            let file = WavFile::read_from(&mut reader, options).map_err(unreadable)?;
-            let entries = file.id3v2().map(id3v2_entries);
-            (file.into(), entries)
-        }
-        Format::Flac => {
-            let file = FlacFile::read_from(&mut reader, options).map_err(unreadable)?;
-            let entries = file.vorbis_comments().map(vorbis_entries);
-            (file.into(), entries)
-        }
-        Format::OggVorbis => {
-            let file = VorbisFile::read_from(&mut reader, options).map_err(unreadable)?;
-            let entries = Some(vorbis_entries(file.vorbis_comments()));
-            (file.into(), entries)
-        }
-    };
+    let (format, file, native_entries): (Format, TaggedFile, Option<Vec<TagEntry>>) =
+        match file_type {
+            FileType::Mpeg => {
+                let file = MpegFile::read_from(&mut reader, options).map_err(unreadable)?;
+                let entries = file.id3v2().map(id3v2_entries);
+                (Format::Mp3, file.into(), entries)
+            }
+            FileType::Wav => {
+                let file = WavFile::read_from(&mut reader, options).map_err(unreadable)?;
+                let entries = file.id3v2().map(id3v2_entries);
+                (Format::Wav, file.into(), entries)
+            }
+            FileType::Aiff => {
+                let file = AiffFile::read_from(&mut reader, options).map_err(unreadable)?;
+                let entries = file.id3v2().map(id3v2_entries);
+                (Format::Aiff, file.into(), entries)
+            }
+            FileType::Flac => {
+                let file = FlacFile::read_from(&mut reader, options).map_err(unreadable)?;
+                let entries = file.vorbis_comments().map(vorbis_entries);
+                (Format::Flac, file.into(), entries)
+            }
+            FileType::Vorbis => {
+                let file = VorbisFile::read_from(&mut reader, options).map_err(unreadable)?;
+                let entries = Some(vorbis_entries(file.vorbis_comments()));
+                (Format::OggVorbis, file.into(), entries)
+            }
+            FileType::Mp4 => {
+                let file = Mp4File::read_from(&mut reader, options).map_err(unreadable)?;
+                let format = match file.properties().codec() {
+                    Some(Mp4Codec::AAC) => Format::Aac,
+                    Some(Mp4Codec::ALAC) => Format::Alac,
+                    codec => {
+                        return Err(format!("unsupported audio format (MP4 holding {codec:?})"));
+                    }
+                };
+                if mp4_holds_video(&mut reader).map_err(|error| format!("unreadable: {error}"))? {
+                    return Err("unsupported audio format (MP4 holding video)".to_owned());
+                }
+                let entries = file.ilst().map(mp4_entries);
+                (format, file.into(), entries)
+            }
+            other => return Err(format!("unsupported audio format ({other:?})")),
+        };
     let duration = file.properties().duration();
-    // WAV's native RIFF INFO chunk holds few fields, so an ID3v2 tag wins when present.
+    // The native chunks of WAV (RIFF INFO) and AIFF (text chunks) hold few fields, so
+    // an ID3v2 tag wins when present.
     let preferred = match format {
-        Format::Wav => file.tag(TagType::Id3v2).or_else(|| file.primary_tag()),
+        Format::Wav | Format::Aiff => file.tag(TagType::Id3v2).or_else(|| file.primary_tag()),
         _ => file.primary_tag(),
     }
     .or_else(|| file.first_tag());
     let tags = preferred.map(tags_from).unwrap_or_default();
     // Without the tag VCMP writes (an MP3 with only ID3v1 or APE, a WAV with only RIFF
-    // INFO), the entries come from the tag the fields were read from.
+    // INFO, an AIFF with only text chunks), the entries come from the tag the fields
+    // were read from.
     let entries = native_entries
         .or_else(|| preferred.map(generic_entries))
         .unwrap_or_default();
@@ -273,6 +312,154 @@ fn described(id: &str, description: &str) -> String {
     } else {
         format!("id3:{id}:{description}")
     }
+}
+
+pub(crate) fn mp4_entries(tag: &Ilst) -> Vec<TagEntry> {
+    // As with ID3v2, lofty's split takes the atoms it has common names for, and the
+    // rest become `mp4:` entries.
+    let (remainder, generic) = tag.clone().split_tag();
+    let mut entries = generic_entries(&generic);
+    for atom in &*remainder {
+        let key = mp4_atom_key(atom.ident());
+        for data in atom.data() {
+            if let Some(value) = atom_text(data) {
+                entries.push(TagEntry {
+                    key: key.clone(),
+                    value,
+                });
+            }
+        }
+    }
+    entries
+}
+
+/// The key the scan lists an atom's values under: lofty's common name when it has one
+/// (a number lofty's split leaves in its atom, like the integer `tmpo`, is still the
+/// `IntegerBpm`), otherwise the atom's own key.
+pub(crate) fn mp4_atom_key(ident: &AtomIdent<'_>) -> String {
+    match ItemKey::from_key(TagType::Mp4Ilst, &atom_name(ident)) {
+        Some(item) => generic_key(item),
+        None => mp4_key(ident),
+    }
+}
+
+/// `mp4:` and the atom's name.
+pub(crate) fn mp4_key(ident: &AtomIdent<'_>) -> String {
+    format!("mp4:{}", atom_name(ident))
+}
+
+/// An atom's name as lofty spells it: its four characters, the bytes read as
+/// Latin-1 (`0xA9` is the copyright sign), or `----:<mean>:<name>`.
+fn atom_name(ident: &AtomIdent<'_>) -> String {
+    match ident {
+        AtomIdent::Fourcc(fourcc) => fourcc.iter().copied().map(char::from).collect(),
+        AtomIdent::Freeform { mean, name } => format!("----:{mean}:{name}"),
+    }
+}
+
+/// An atom value as text: text as it is, numbers and flags in decimal. Pictures and
+/// other binary data hold no text to list.
+pub(crate) fn atom_text(data: &AtomData) -> Option<String> {
+    match data {
+        AtomData::UTF8(text) | AtomData::UTF16(text) => Some(text.clone()),
+        AtomData::SignedInteger(number) => Some(number.to_string()),
+        AtomData::UnsignedInteger(number) => Some(number.to_string()),
+        AtomData::Bool(flag) => Some(u8::from(*flag).to_string()),
+        AtomData::Picture(_) | AtomData::Unknown { .. } => None,
+    }
+}
+
+/// The keys the scan lists an atom's values under.
+pub(crate) fn atom_keys(atom: &Atom<'static>) -> Vec<String> {
+    let mut single = Ilst::new();
+    single.insert(atom.clone());
+    mp4_entries(&single)
+        .into_iter()
+        .map(|entry| entry.key)
+        .collect()
+}
+
+/// Whether an MP4 file has a video track, by the handler of each track
+/// (`moov/trak/mdia/hdlr`). lofty reads only the audio track.
+fn mp4_holds_video<R: Read + Seek>(reader: &mut R) -> io::Result<bool> {
+    let end = reader.seek(SeekFrom::End(0))?;
+    let Some(moov) = child_box(reader, (0, end), *b"moov")? else {
+        return Ok(false);
+    };
+    let mut position = moov.0;
+    while let Some((kind, body, next)) = next_box(reader, position, moov.1)? {
+        position = next;
+        if kind != *b"trak" {
+            continue;
+        }
+        let Some(mdia) = child_box(reader, (body, next), *b"mdia")? else {
+            continue;
+        };
+        let Some((hdlr, hdlr_end)) = child_box(reader, mdia, *b"hdlr")? else {
+            continue;
+        };
+        // Version and flags, a reserved word, then the handler type.
+        if hdlr_end - hdlr < 12 {
+            continue;
+        }
+        reader.seek(SeekFrom::Start(hdlr + 8))?;
+        let mut handler = [0; 4];
+        reader.read_exact(&mut handler)?;
+        if handler == *b"vide" {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// The box at `position`, ending by `end`: its type, where its body starts and where
+/// it ends. None past the last box, or at a box that doesn't fit.
+fn next_box<R: Read + Seek>(
+    reader: &mut R,
+    position: u64,
+    end: u64,
+) -> io::Result<Option<([u8; 4], u64, u64)>> {
+    if end.saturating_sub(position) < 8 {
+        return Ok(None);
+    }
+    reader.seek(SeekFrom::Start(position))?;
+    let mut header = [0; 8];
+    reader.read_exact(&mut header)?;
+    let kind = [header[4], header[5], header[6], header[7]];
+    let (body, size) = match u32::from_be_bytes([header[0], header[1], header[2], header[3]]) {
+        // The box runs to the end of its parent.
+        0 => (position + 8, end - position),
+        // A 64-bit size follows the type.
+        1 => {
+            if end - position < 16 {
+                return Ok(None);
+            }
+            let mut size = [0; 8];
+            reader.read_exact(&mut size)?;
+            (position + 16, u64::from_be_bytes(size))
+        }
+        size => (position + 8, u64::from(size)),
+    };
+    Ok(position
+        .checked_add(size)
+        .filter(|&box_end| box_end <= end && body <= box_end)
+        .map(|box_end| (kind, body, box_end)))
+}
+
+/// The body of the first box of type `wanted` among the boxes in `within`.
+fn child_box<R: Read + Seek>(
+    reader: &mut R,
+    within: (u64, u64),
+    wanted: [u8; 4],
+) -> io::Result<Option<(u64, u64)>> {
+    let mut position = within.0;
+    while let Some((kind, body, box_end)) = next_box(reader, position, within.1)? {
+        if kind == wanted {
+            return Ok(Some((body, box_end)));
+        }
+        position = box_end;
+    }
+    Ok(None)
 }
 
 pub(crate) fn vorbis_entries(tag: &VorbisComments) -> Vec<TagEntry> {

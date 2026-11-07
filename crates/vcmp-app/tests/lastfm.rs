@@ -16,16 +16,18 @@ use common::{Song, add};
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use slint::ComponentHandle;
 use tempfile::TempDir;
-use vcmp_app::lastfm_service::{self, LastfmService, LastfmWorker, QueueStore, SETTING_USER};
+use vcmp_app::lastfm_service::{
+    self, LastfmService, LastfmWorker, QueueStore, SETTING_LOVE, SETTING_USER,
+};
 use vcmp_app::library_service::LibraryPaths;
 use vcmp_app::library_view::LibraryView;
 use vcmp_app::player_service::{PlayerControl, PlayerService};
-use vcmp_app::{AppWindow, LastfmProblem, LastfmState, LastfmStatus};
+use vcmp_app::{AppWindow, LastfmImport, LastfmProblem, LastfmState, LastfmStatus};
 use vcmp_integrations::lastfm::{
-    self, Client, ConnectError, Credentials, Error, MemorySessions, Report, Scrobbler, Timing,
-    Transport,
+    self, Client, ConnectError, Credentials, Error, ImportError, Imported, MemorySessions, Report,
+    Scrobbler, Timing, Transport,
 };
-use vcmp_library::Library;
+use vcmp_library::{Library, TrackId};
 use vcmp_playback::{Command, Event, NowPlaying, PlaybackState, QueueEntry, TrackRef};
 
 /// What was asked of the scrobbler thread.
@@ -37,6 +39,8 @@ enum Asked {
     Disconnect,
     NowPlaying(lastfm::Track),
     Flush,
+    FlushLoves,
+    Import,
 }
 
 #[derive(Clone, Default)]
@@ -71,6 +75,14 @@ impl LastfmWorker for Worker {
 
     fn flush(&self) {
         self.0.borrow_mut().push(Asked::Flush);
+    }
+
+    fn flush_loves(&self) {
+        self.0.borrow_mut().push(Asked::FlushLoves);
+    }
+
+    fn import_loved(&self) {
+        self.0.borrow_mut().push(Asked::Import);
     }
 }
 
@@ -382,6 +394,7 @@ fn play(app: &App, player: &PlayerService, length: Duration) {
     player.handle_event(Event::TrackChanged(Some(NowPlaying {
         entry: QueueEntry::new(TrackRef::local(path)),
         duration: Some(length),
+        origin: None,
     })));
     player.handle_event(Event::StateChanged(PlaybackState::Playing));
 }
@@ -497,6 +510,14 @@ impl Transport for Script {
             .pop_front()
             .expect("an answer for each request")
     }
+
+    fn get(&mut self, _: &str, _: &[(String, String)]) -> Result<(u16, String), String> {
+        self.answers
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("an answer for each request")
+    }
 }
 
 fn accepted(count: usize) -> Result<(u16, String), String> {
@@ -582,4 +603,266 @@ fn the_queue_survives_a_restart_and_drains_in_batches() {
     );
     assert_eq!(sent, [50, 50, 20]);
     assert_eq!(open().queued_scrobble_count().unwrap(), 0);
+}
+
+/// The library's hearts, heard by `app`'s Last.fm service as in the app.
+fn hearts(app: &App) -> Rc<LibraryView> {
+    let view = LibraryView::connect(&app.window, app.library.clone()).unwrap();
+    app.service.as_ref().unwrap().attach(view.hearts());
+    view
+}
+
+impl App {
+    fn opening_id(&self) -> TrackId {
+        self.library
+            .track_id_for_path(&self.music.join("1.flac"))
+            .unwrap()
+            .unwrap()
+    }
+
+    fn love_switch(&self) -> Vec<ElementHandle> {
+        ElementHandle::find_by_accessible_label(&self.window, "Love on Last.fm")
+            .filter(|element| element.accessible_role() == Some(AccessibleRole::Switch))
+            .collect()
+    }
+
+    fn waiting_loves(&self) -> Vec<vcmp_library::Love> {
+        self.library
+            .queued_loves(50)
+            .unwrap()
+            .into_iter()
+            .map(|queued| queued.love)
+            .collect()
+    }
+}
+
+fn love(love: bool) -> vcmp_library::Love {
+    vcmp_library::Love {
+        artist: "Band".into(),
+        title: "Opening".into(),
+        love,
+    }
+}
+
+#[test]
+fn the_love_and_import_rows_show_while_connected() {
+    let app = start(true, |_| {});
+    app.open_settings();
+    assert!(app.love_switch().is_empty());
+    assert!(app.buttons("Import loved tracks from Last.fm").is_empty());
+    app.connect_listener();
+    assert_eq!(app.love_switch().len(), 1);
+    assert!(!app.state().get_love(), "off by default");
+    assert_eq!(app.buttons("Import loved tracks from Last.fm").len(), 1);
+}
+
+#[test]
+fn hearts_are_loved_only_while_the_switch_is_on() {
+    let app = start(true, |_| {});
+    let view = hearts(&app);
+    let id = app.opening_id();
+    view.hearts().set(&[id], true);
+    assert!(app.waiting_loves().is_empty(), "no account");
+
+    app.connect_listener();
+    view.hearts().set(&[id], false);
+    assert!(app.waiting_loves().is_empty(), "the switch is off");
+
+    app.love_switch()[0].invoke_accessible_default_action();
+    assert!(app.state().get_love());
+    assert_eq!(
+        app.library.setting(SETTING_LOVE).unwrap().as_deref(),
+        Some("1")
+    );
+    view.hearts().set(&[id], true);
+    assert_eq!(app.waiting_loves(), [love(true)]);
+    assert_eq!(app.worker.take(), [Asked::FlushLoves]);
+    assert_eq!(app.state().get_unsent_loves(), 1);
+
+    // Liked already: nothing changes, so nothing more is sent.
+    view.hearts().set(&[id], true);
+    assert!(app.worker.take().is_empty());
+
+    // Taken away before the love went out: only the unlove waits.
+    view.hearts().set(&[id], false);
+    assert_eq!(app.waiting_loves(), [love(false)]);
+
+    // Switched off, the unlove waiting still goes out, but no new heart is queued.
+    app.love_switch()[0].invoke_accessible_default_action();
+    assert!(!app.state().get_love());
+    view.hearts().set(&[id], true);
+    assert_eq!(app.waiting_loves(), [love(false)]);
+    assert_eq!(app.worker.take(), [Asked::FlushLoves]);
+}
+
+#[test]
+fn the_switch_is_remembered() {
+    let app = start(true, |library| {
+        library.set_setting(SETTING_LOVE, "1").unwrap();
+    });
+    assert!(app.state().get_love());
+}
+
+#[test]
+fn disconnecting_drops_the_loves_waiting() {
+    let app = start(true, |_| {});
+    let view = hearts(&app);
+    app.connect_listener();
+    app.state().invoke_set_love(true);
+    view.hearts().set(&[app.opening_id()], true);
+    assert_eq!(app.state().get_unsent_loves(), 1);
+    app.press("Disconnect from Last.fm");
+    assert_eq!(app.state().get_unsent_loves(), 0);
+}
+
+#[test]
+fn an_import_shows_its_pages_then_what_matched() {
+    let app = start(true, |_| {});
+    let _view = hearts(&app);
+    app.connect_listener();
+    app.open_settings();
+    app.press("Import loved tracks from Last.fm");
+    assert_eq!(app.worker.take(), [Asked::Import]);
+    assert!(app.state().get_importing());
+    assert!(
+        app.buttons("Import loved tracks from Last.fm")[0].accessible_enabled() == Some(false),
+        "one import at a time"
+    );
+    app.service()
+        .report(Report::ImportProgress { page: 2, pages: 5 });
+    assert_eq!(app.state().get_import_page(), 2);
+    assert_eq!(app.state().get_import_pages(), 5);
+
+    // The scrobbler thread liked the track in the database.
+    let id = app.opening_id();
+    app.library
+        .like_at(&[(id, UNIX_EPOCH + Duration::from_secs(1_700_000_000))])
+        .unwrap();
+    assert!(!vcmp_app::favourites::liked(id));
+    app.service().report(Report::Imported(Imported {
+        matched: 1,
+        unmatched: 3,
+    }));
+    assert!(!app.state().get_importing());
+    assert_eq!(app.state().get_import_result(), LastfmImport::Done);
+    assert_eq!(app.state().get_import_matched(), 1);
+    assert_eq!(app.state().get_import_unmatched(), 3);
+    assert!(vcmp_app::favourites::liked(id), "the hearts show it");
+    assert!(app.worker.take().is_empty(), "imported likes are not loved");
+}
+
+#[test]
+fn a_failed_import_is_explained_and_can_run_again() {
+    let app = start(true, |_| {});
+    app.connect_listener();
+    app.open_settings();
+    app.press("Import loved tracks from Last.fm");
+    app.service()
+        .report(Report::ImportFailed(ImportError::Lastfm(Error::Network(
+            "connection refused".into(),
+        ))));
+    assert!(!app.state().get_importing());
+    assert_eq!(app.state().get_import_result(), LastfmImport::Failed);
+    assert_eq!(app.state().get_import_detail(), "connection refused");
+    app.press("Import loved tracks from Last.fm");
+    assert_eq!(app.worker.take(), [Asked::Import, Asked::Import]);
+    assert_eq!(app.state().get_import_result(), LastfmImport::None);
+}
+
+fn loved_page(page: u32, pages: u32, tracks: &[(&str, &str)]) -> Result<(u16, String), String> {
+    let tracks: Vec<String> = tracks
+        .iter()
+        .map(|(artist, title)| {
+            format!(
+                r#"{{"name":"{title}","artist":{{"name":"{artist}"}},"date":{{"uts":"1600000000"}}}}"#
+            )
+        })
+        .collect();
+    Ok((
+        200,
+        format!(
+            r#"{{"lovedtracks":{{"track":[{}],"@attr":{{"page":"{page}","totalPages":"{pages}"}}}}}}"#,
+            tracks.join(",")
+        ),
+    ))
+}
+
+#[test]
+fn an_import_likes_the_library_tracks_that_match() {
+    let app = start(true, |_| {});
+    // A second copy of the song, and one that is not loved.
+    add(
+        &app.music,
+        "2.flac",
+        Song {
+            track: 1,
+            ..Song::new("Opening", "Band", "Compilation")
+        },
+    );
+    add(&app.music, "3.flac", Song::new("Closing", "Band", "Record"));
+    let mut library = Library::open(&app.paths.database, &app.paths.cache).unwrap();
+    library.scan(&AtomicBool::new(false), |_| {}).unwrap();
+    let sessions = MemorySessions::default();
+    sessions
+        .0
+        .lock()
+        .unwrap()
+        .insert("listener".into(), "sk".into());
+    let (sender, reports) = mpsc::channel();
+    let scrobbler = Scrobbler::start(
+        Client::new(
+            Script {
+                answers: Arc::new(Mutex::new(
+                    vec![
+                        loved_page(1, 2, &[("BAND", "opening"), ("Other", "Elsewhere")]),
+                        loved_page(2, 2, &[("B\u{e1}nd", "\u{d3}pening")]),
+                    ]
+                    .into(),
+                )),
+                batches: Arc::default(),
+            },
+            Credentials::new(Some("key"), Some("secret")).unwrap(),
+        ),
+        sessions,
+        QueueStore(library),
+        Timing::default(),
+        move |report| {
+            let _ = sender.send(report);
+        },
+    );
+    scrobbler.resume("listener");
+    scrobbler.import_loved();
+    let next = || reports.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(next(), Report::ImportProgress { page: 1, pages: 2 });
+    assert_eq!(next(), Report::ImportProgress { page: 2, pages: 2 });
+    assert_eq!(
+        next(),
+        Report::Imported(Imported {
+            matched: 2,
+            unmatched: 1
+        })
+    );
+    let mut liked: Vec<(String, Option<String>, SystemTime)> = app
+        .library
+        .favourites()
+        .unwrap()
+        .into_iter()
+        .map(|favourite| {
+            (
+                favourite.track.title,
+                favourite.track.album,
+                favourite.liked,
+            )
+        })
+        .collect();
+    liked.sort();
+    let loved_at = UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+    assert_eq!(
+        liked,
+        [
+            ("Opening".into(), Some("Compilation".into()), loved_at),
+            ("Opening".into(), Some("Record".into()), loved_at),
+        ]
+    );
+    assert_eq!(app.library.queued_love_count().unwrap(), 0);
 }

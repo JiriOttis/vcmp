@@ -184,3 +184,36 @@ fn favourites_export_newest_first() {
          #EXTINF:1,Band - Two\nb.flac\n"
     );
 }
+
+#[test]
+fn likes_at_a_given_time_keep_an_earlier_heart() {
+    let mut setup = Setup::new();
+    let [a, b, c] = setup.three();
+    setup.library.like(&[c]).unwrap();
+    let before = setup.library.favourites().unwrap()[0].liked;
+    let old = std::time::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+    let older = std::time::UNIX_EPOCH + Duration::from_secs(1_500_000_000);
+    let liked = setup
+        .library
+        .like_at(&[(a, old), (b, older), (c, older), (TrackId(9999), old)])
+        .unwrap();
+    assert_eq!(liked, 2, "c was liked already and 9999 is no track");
+    assert_eq!(setup.titles(), ["Three", "One", "Two"]);
+    let favourites = setup.library.favourites().unwrap();
+    assert_eq!(favourites[0].liked, before);
+    assert_eq!(favourites[1].liked, old);
+    assert_eq!(favourites[2].liked, older);
+}
+
+#[test]
+fn track_names_include_missing_files() {
+    let mut setup = Setup::new();
+    let [a, _, c] = setup.three();
+    fs::remove_file(setup.music().join("c.flac")).unwrap();
+    setup.scan();
+    let mut names = setup.library.track_names().unwrap();
+    names.sort();
+    assert_eq!(names.len(), 3);
+    assert_eq!(names[0], (a, "Band".to_string(), "One".to_string()));
+    assert!(names.contains(&(c, "Band".to_string(), "Three".to_string())));
+}

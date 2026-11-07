@@ -131,6 +131,14 @@ a plain placeholder (a "V" in Sora, the accent pink on the dark base,
   hues, one for every built-in theme; theme files bring their own. Settings shows
   the themes as tiles of their colours with the accents as dots below; the setup
   wizard shows the built-in themes and the accent only.
+- 2026-11-07, lyrics (chosen from offered options, issue #85,
+  `docs/specs/2026-11-07-lyrics-in-now-playing.md`): lyrics live in the now playing
+  view behind a toggle that swaps the large cover for them, the cover going small
+  beside the title, the same in wide and narrow windows. The toggle is remembered.
+  A track without lyrics shows the view as before. The player bar gets a lyrics
+  button that opens now playing on them; it stays in place, disabled, while the
+  track has none. "Find lyrics online" is in Settings and in the setup wizard's
+  Online services step.
 
 ## Awaiting the owner's review
 
@@ -169,3 +177,12 @@ the owner's until reviewed; keep, change or drop each.
   While a theme file is chosen the accent dots are hidden, with a line saying the file
   brings its own accent. A tile is a small preview of base, mantle, surface, text and
   the accent, with the theme's name below and a ring around the chosen one.
+- 2026-11-07, the details of lyrics (issue #85): the lyrics icon is a speech bubble
+  with two lines of text. In lyrics mode the small cover is 80 px, the title 26 px,
+  and the lines 20 px, centred, at most 720 px wide; the line playing is bold in the
+  accent, the others muted, and it stays in the middle of the list, gliding there
+  as the mouse wheel glides. The view's toggle sits left of the track's menu in the
+  top right corner. The bar's lyrics button comes first of its three switches.
+  So the new button fits at 720 px, the bar's buttons on the right sit 4 px apart
+  instead of 8 px at every width, and at the narrowest the volume slider may shrink
+  to 52 px and the playing track's title to 120 px with its cover.

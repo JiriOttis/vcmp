@@ -15,10 +15,10 @@ DESIGN.md).
 | File | Holds |
 |---|---|
 | `ui/theme.slint` | `ThemePalette` struct, `ThemeKind` and `ReduceMotion` enums, `Theme` global: the chosen theme's colours and kind, spacing, radii, type sizes, target height, content, column and dialog widths, the detail pages' cover size, the zoom, durations, drag scrolling |
-| `ui/components.slint` | `FocusRing`, `MenuHost` (see "Menus over lists"), `ScrollArea` (every scrolling part but the album grid and the songs table, without a scroll bar), `EdgeScroll`, `NavItem`, `PlaylistLink`, `SegmentedChoice`, `Toggle`, `SettingRow`, `Button`, `IconButton`, `Dropdown`, `SearchField`, `TextField`, `ProgressBar`, `Modal` (the dialog frame of the tag editor, the pickers, the confirmation and the setup wizard) |
+| `ui/components.slint` | `FocusRing`, `MenuHost` (see "Menus over lists"), `ScrollArea` (every scrolling part but the album grid and the songs table, without a scroll bar), `EdgeScroll`, `NavItem`, `PlaylistLink`, `SegmentedChoice`, `Toggle`, `SettingRow`, `Button`, `IconButton`, `Dropdown`, `SearchField`, `TextField`, `ProgressBar`, `Modal` (the dialog frame of the tag editor, the pickers, the confirmation, the setup wizard and the import report) |
 | `ui/setup.slint` | `Setup` global and `SetupWizard`: the first-run setup wizard (see "Setup wizard") |
 | `src/setup.rs` | Whether the wizard opens at the start, and its `ui.setup_done` flag |
-| `ui/setting-rows.slint` | `DiscordRow`, `ZoomRow`, `MotionRow`: Settings rows the setup wizard shows too |
+| `ui/setting-rows.slint` | `DiscordRow`, `LyricsOnlineRow`, `ZoomRow`, `MotionRow`: Settings rows the setup wizard shows too |
 | `ui/themes.slint` | `Themes` global, `ThemeWords` and `ThemeRows`: the theme tiles, the accent dots and the theme file buttons, notes and contrast warning (see "Themes") |
 | `ui/confirmation.slint` | `Confirmation` global and `ConfirmDialog`: the "are you sure?" before deleting a playlist, a label or the agents' backups |
 | `ui/icons.slint` | The `Glyph` names, the `IconArt` global and `Icon` |
@@ -28,16 +28,18 @@ DESIGN.md).
 | `ui/picture.slint` | `PictureFrame`, `PictureSlot`, the `MovingPictures` global and `MovingPicture`: a detail page's or the now playing view's picture, which plays an animation's frames while in sight |
 | `src/moving_pictures.rs` | Decodes an animated picture's frames off the UI thread while it is in sight with motion allowed, and lets them go after |
 | `ui/playlist-state.slint` | `Playlists` global: the playlist names every Add to playlist menu lists |
+| `ui/playlist-import.slint` | `PlaylistImport` global, `UnmatchedEntry` and `PlaylistImportReport`: the dialog saying what an import of an M3U file left out |
 | `src/playlists.rs` | `PlaylistBrowser`: the playlist grid and page, the sidebar list, and the edits behind them |
 | `ui/artist-page.slint` | `ArtistView`: one artist's picture, albums and appearances |
-| `ui/songs-page.slint` | `SongTable`: every track with sortable columns, only the rows in view created |
+| `ui/songs-page.slint` | `SongTable`: every track with sortable columns that the header menu shows and hides, only the rows in view created; `SongDates`, the Last played and Added texts |
+| `src/days.rs` | Local calendar days (`DayStamp`) for the songs table's Last played and Added columns |
 | `ui/folders-page.slint` | `FolderBrowser`: the path back up, the folders and the files of one folder |
 | `src/folders.rs` | `FolderBrowser`: the folder tree built from the library's tracks |
 | `ui/album-page.slint` | `AlbumView`: one album's cover, details and tracks by disc; `TrackList`, the track list every page shares, and its `TrackSelection` global |
 | `ui/selection.slint` | `SelectionChange`: how a track list's selection changes |
-| `ui/columns.slint` | `ColumnWidths` global (the saved column shares) and `ColumnEdge`, the resizable edge between two column headings |
+| `ui/columns.slint` | `ColumnWidths` global (the saved column shares), `SongColumns` (the songs table's columns that show) and `ColumnEdge`, the resizable edge between two column headings |
 | `src/selection.rs` | Applies selection changes to a list's rows, and picks the rows a menu acts on |
-| `ui/cover-picker.slint` | `CoverSearch` global and `CoverPicker`: "Find cover online" and the covers to pick from |
+| `ui/cover-picker.slint` | `CoverSearch` global and `CoverPicker`: "Find cover online" and the covers to pick from, for the album page's album or any album by id (`find-album`) |
 | `src/cover_fetch.rs` | `CoverFetch`: runs the cover search, stores the picked cover and shows it everywhere |
 | `ui/photo-picker.slint` | `PhotoSearch` global and `PhotoPicker`: an artist's photo, found online or from a file |
 | `src/artist_photos.rs` | `ArtistPhotos`: runs the photo search, keeps the chosen photo and shows it on the page and the cards |
@@ -48,17 +50,19 @@ DESIGN.md).
 | `ui/library-state.slint` | `LibraryState` global: music folders, scan progress and results |
 | `ui/library-settings.slint` | The Music folders section of Settings, shown in the setup wizard too |
 | `src/library_service.rs` | `LibraryService`: folders, background scans, automatic updates |
-| `ui/player-state.slint` | `PlayerState` global: the current track, position, volume, shuffle, repeat |
+| `ui/player-state.slint` | `PlayerState` global: the current track, position, volume, shuffle, repeat, lyrics |
 | `ui/player-bar.slint` | `PlayerBar`, its play button and the `Slider` |
-| `ui/now-playing.slint` | `NowPlayingView`: the playing track's large cover and details over the pages |
+| `ui/now-playing.slint` | `NowPlayingView`: the playing track's large cover and details over the pages, or its lyrics |
+| `ui/lyrics.slint` | `LyricsView`: synced lyrics following the line playing, or plain lyrics, in the now playing view |
 | `ui/queue-panel.slint` | `QueuePanel`: the track playing, Up next and what follows |
 | `ui/icons/*.svg` | The control icons, painted in `currentColor` |
 | `src/icons.rs` | `IconArt`: writes the tint into an icon's SVG and keeps the result |
 | `src/player_service.rs` | `PlayerService`: commands to the playback engine, its events into `PlayerState` |
+| `src/player_service/lyrics.rs` | The playing track's lyrics: read off the UI thread, LRCLIB asked through the cache, the line playing timed from the positions |
 | `src/saved_queue.rs` | The queue kept across restarts, as versioned JSON in the settings |
-| `ui/lastfm-state.slint` | `LastfmState` global: whether the build has Last.fm, the account, connecting, and what went wrong |
-| `ui/lastfm-settings.slint` | `LastfmRow`: the Last.fm setting and its Connect, Cancel or Disconnect button |
-| `src/lastfm_service.rs` | `LastfmService`: the Last.fm row, the account, and plays into the scrobble queue |
+| `ui/lastfm-state.slint` | `LastfmState` global: whether the build has Last.fm, the account, connecting, what went wrong, "Love on Last.fm" and the import of loved tracks |
+| `ui/lastfm-settings.slint` | `LastfmRow`: the Last.fm setting and its Connect, Cancel or Disconnect button; `LastfmLoveRow` and `LastfmImportRow`, shown while an account is connected |
+| `src/lastfm_service.rs` | `LastfmService`: the Last.fm rows, the account, plays into the scrobble queue, hearts into the love queue, and the import's progress and result |
 | `ui/app-window.slint` | `AppWindow`: sidebar, current-page marker, content area |
 | `ui/updates.slint` | `UpdateState` global, `UpdateLink`, the sidebar's update note, `UpdateCheckRow` and the Updates section of Settings |
 | `ui/agents.slint` | `AgentState` global, `AgentsSwitchRow`, the AI agents section of Settings (switch, connection, the playback switch, backups), `ChangeHistory` (the dialog listing the changes by agents), the sidebar's review note and `ChangeReview`, the dialog that reviews a change, with `ChangeTable` for each file's changes |
@@ -69,6 +73,8 @@ DESIGN.md).
 | `src/labels.rs` | `LabelBrowser`: labels behind the `Labels` global: the menus' choices and toggles, the dialog, the filters, the label page, the chips rows show, the colour picker's images |
 | `ui/favourites.slint` | `Favourites` global (the fixed name, the menus' entry and the hearts' callbacks) and `FavouritesPicture`, the heart the Favourites playlist shows for a picture |
 | `src/favourites.rs` | `Hearts`: the liked set rows read, the one path that likes and unlikes, and the update of every heart on screen |
+| `ui/library-check.slint` | `LibraryCheck` global and `LibraryCheckPage`: duplicates, missing tags and missing covers, opened from Settings (see "Library check") |
+| `src/library_check.rs` | `CheckPage`: fills the page from the library's checks, hands its actions to the player, the tag editor, the cover picker and the file manager, and stores "Not duplicates" |
 | `src/theme/mod.rs` | The built-in themes, the accents and the labels' colours, plus their contrast tests; `apply` hands a palette to the `Theme` global |
 | `src/theme/contrast.rs` | The WCAG AA check: the pairs a palette must keep apart, used by the tests and the Settings warning |
 | `src/theme/file.rs` | Theme files: reading, writing and listing the themes folder |
@@ -200,7 +206,8 @@ border, so the dialog's text keeps base's contrast.
 | Red only for errors, with words | The owner's choice (2026-10-18): pink means active, so a wrong value marked in pink read as selected. The red label is bold and the sentence under the form names the field, so the colour never carries the message alone |
 | Sora for everything, two weights (400, 600) | The owner's choice; two weights carry hierarchy without a second family at ENERGY 1 |
 | Type scale 12 / 14 / 16 / 20 / 26 px, and 34 px for the track in the now playing view (42 px when the view is wider than 1800 px) and for the title of an album, artist or playlist page | Small steps suit a calm UI; the page title is the one large element per screen, and the now playing view's and a detail page's titles take its place there, a step larger next to the large cover. A detail page's artist line is 20 px and its counts 14 px, so the header reads at a glance beside its cover (the owner's request, 2026-10-28) |
-| Now playing covers the pages, not the player bar | The bar already holds every control, so the view needs none of its own and the controls stay where people know them |
+| Now playing covers the pages, not the player bar | The bar already holds every control, so the view needs none of its own and the controls stay where people know them. The one exception is the lyrics toggle, which switches what the view itself shows ([lyrics spec](specs/2026-11-07-lyrics-in-now-playing.md)) |
+| Lyrics take the cover's place in now playing, behind a toggle that is remembered; the player bar has a lyrics button too, always there and disabled while the track has none | The owner's choices (2026-11-07): one arrangement for wide and narrow windows with the most room for the lines, a view that looks as before for tracks without lyrics, one click from anywhere, and a bar whose buttons never move between tracks. The line playing is in the accent, whose job is "what plays now" |
 | Titles, artists and albums of the playing track are links, underlined on hover | People expect to go from what plays to where it comes from; the underline marks a link without adding colour |
 | Spacing scale 4 / 8 / 12 / 16 / 24 / 40 px | Bigger gaps separate sections, small ones group a label with its description |
 | Radii 2 / 8 / 12 px; round (half the element's size) for icon-only buttons, the play button, progress and slider tracks, the slider knob and drop lines; the switch is a pill | Circles and round-ended tracks are what those controls are; everything else uses the three radii. `tests/ui_invariants.rs` refuses a radius written in bare pixels |
@@ -448,6 +455,20 @@ the new view in too.
   the owner's playlists alone. New playlist makes "Playlist n" and opens it with the
   name field focused and selected, ready to be typed over. With no playlist of the
   owner's yet, the page says how to make one above the grid.
+- **Import…** (spoken "Import playlist…"; the short text keeps it and New playlist
+  beside the title on the narrowest page) opens the system's file dialog for `.m3u`
+  and `.m3u8` files, in the folder of the last import while VCMP runs. The file
+  becomes a new playlist named after it (how entries match is in
+  `docs/library.md`, "Playlists"), which opens. When every entry matched, that is
+  all. Otherwise a dialog (`PlaylistImportReport`) shows over it: "Imported as
+  “name”", how many entries were left out, and each of them: its `#EXTINF` text
+  ("Artist - Title") with the path as the file wrote it in a smaller, muted line
+  below, or the path alone, in the text style, without one. When nothing matched, no playlist
+  is made and the dialog over the grid says "No playlist was imported" and lists
+  every entry; an empty file or one that can't be read says that instead. The
+  focus starts on Close; Escape, Close or a click beside the card close it, and the
+  focus goes to the new playlist's back button or back to Import…. While the focus
+  is on Close, the arrows, Page Up, Page Down, Home and End scroll the list.
 - **A playlist's page** (`PlaylistView`) shows its picture, name, number of tracks,
   minutes of the tracks that can play and how many files are not found, then
   Play, Shuffle and a More button (a right click on it does the same) with
@@ -615,6 +636,13 @@ table can select several tracks for the track menu.
   the library's settings when a drag or key press ends (`ui.track_columns`,
   `ui.song_columns`, numbers separated by spaces) and read at start
   (`src/preferences.rs`); anything else saved there is ignored.
+- **Hiding (songs table only):** a right click on the headings, or the Menu key
+  while one has the focus, opens a menu of checkable columns (`SongColumns`,
+  `ui/columns.slint`): every column but Title. A hidden text column keeps its share
+  for when it comes back; the edge after Title moves to the next text column shown,
+  and the one between Artist and Album shows only while both do. The columns shown
+  are saved by name (`ui.song_columns_shown`, e.g. `artist album year duration`);
+  without that setting all show but Plays, Last played and Added.
 
 ## Search
 
@@ -653,7 +681,8 @@ buttons (caught in the winit hook, `src/shortcuts.rs`) and Alt+Left and Alt+Righ
 (the window's shortcut scope, not while typing) move through it.
 
 - **A place** is a section on its grid, or the album, artist (or an artist's
-  album) or playlist page open in it.
+  album) or playlist page open in it, or the Library check open in place of
+  Settings.
 - **Remembering:** the window calls `navigated` whenever the section or the page
   open in it changes, however that came about: the sidebar, a card, a back button,
   Escape, a link in the player bar. Moving somewhere new drops what was ahead, as a
@@ -694,11 +723,14 @@ field (see [Labels](#labels)).
 ## Songs page
 
 - **The table** (`SongTable`) lists every available track: Title, Artist, Album,
-  Year and Time. Like the album grid, it only creates the rows in view (a test
-  checks that 5,000 songs create fewer than 60 rows).
+  Year and Time, and on request Plays, Last played and Added (see
+  [Play history](#play-history)). Like the album grid, it only creates the rows in
+  view (a test checks that 5,000 songs create fewer than 60 rows).
 - **Sorting:** a header sorts by its column; the same header again reverses the
   order. Ties keep album and track order, and missing artists, albums and years
-  go last. The order is saved (`ui.songs_sort`), and starts by artist.
+  go last. Tracks never played follow the played ones in both directions of Plays
+  and Last played, by title. The order is saved (`ui.songs_sort`), and starts by
+  artist; hiding the column it follows goes back to Title.
 - **Loading:** the tracks are read the first time the page is shown, not at
   startup, and again after library changes once they were loaded.
 - **Keyboard:** the headers are buttons; the rows are one tab stop with Up/Down,
@@ -708,9 +740,18 @@ field (see [Labels](#labels)).
 - **Playing:** a row's play button, a double-click or Enter plays every song in the
   table's order from that one; the queue panel says "Next from all songs".
 - **Columns:** the edges between the Title, Artist and Album headings resize those
-  columns (see [Table columns](#table-columns)); Year and Time keep their widths.
-  While labels exist, a Labels column of 140 px before Year shows a track's first
-  label and how many more it has.
+  columns (see [Table columns](#table-columns)); Year, Time, Plays (56 px), Last
+  played and Added (104 px each) keep their widths. While labels exist, a Labels
+  column of 140 px before Year shows a track's first label and how many more it
+  has. The header menu shows and hides every column but Title.
+- **Play history columns:** Plays is the track's count (0 when never played). Last
+  played and Added read "Today", "Yesterday", "2 days ago" to "6 days ago", then a
+  date such as "7 Nov 2026" (empty for a track never played). The rows carry the
+  local day and its date (`DayStamp`, from `src/days.rs`) and `SongDates` turns
+  them into text through `@tr()` against `SongDates.today`, which a one-minute
+  timer moves on after midnight (also soon after the computer wakes). A play that
+  counts updates its rows in place; the order follows on the next sort, filter or
+  library change.
 
 ## Folders page
 
@@ -750,7 +791,28 @@ field (see [Labels](#labels)).
   is dropped.
 - **An animated cover** plays here too, at up to 1200 px (see
   [Animated pictures](#animated-pictures)).
-- Lyrics would go here later.
+- **Lyrics** ([spec](specs/2026-11-07-lyrics-in-now-playing.md)): for a track
+  with lyrics, a lyrics button beside the track's menu (top right) switches the view
+  to them and back; the choice is saved (`ui.lyrics_shown`) and applies to every
+  track that has lyrics. In lyrics mode the cover goes small (80 px) beside the
+  title, artist and album, without the next track, and the lyrics take the rest of
+  the view, at most 720 px wide, in wide and narrow windows alike. A track without
+  lyrics shows the view as before, without the button. Lyrics that arrive a moment
+  after the track started (an LRCLIB answer) switch the open view when they land.
+  - **Synced lyrics** (`LyricsView`, `ui/lyrics.slint`): one line per row, the line
+    playing in the accent and bold, the others muted. The line playing is kept in
+    the middle: the list glides there a third of the way each 16 ms, as the mouse
+    wheel does, or jumps with reduced motion on. A click on a line plays from its
+    start. The lines are one tab stop: Up/Down, Page Up/Down (five lines),
+    Home/End move the keyboard's line, Enter or Space plays from it.
+  - **Plain lyrics** are one text that scrolls; Up/Down, Page Up/Down and Home/End
+    scroll it from the keyboard.
+  - **Where the line comes from:** `src/player_service/lyrics.rs` takes the
+    engine's position (every 250 ms) and, between positions, the time since, and
+    starts a timer for the moment the next line begins, so lines change on time
+    rather than up to 250 ms late. A seek or pause starts again from the next
+    position. Where the lyrics come from is in
+    [docs/library.md](library.md#lyrics).
 
 ## Animated pictures
 
@@ -829,11 +891,15 @@ The Albums page tells apart why it is empty:
     volume slider changes it, 5 % a notch (a third of that each frame of a
     `WheelScroller` glide, which adds up the same), and the volume is saved once
     the wheel has rested for 400 ms;
-  - after the artist, a mark for a lossless file (FLAC or WAV, from the library's
+  - after the artist, a mark for a lossless file (FLAC, WAV, AIFF or ALAC, from the library's
     `tracks.format`) and, while a Last.fm account is connected, a mark for a play
     Last.fm will count, which changes to a tick once it has (`PlayerState.scrobble`,
     set from the same `lastfm::Play` that hands the scrobble over). Pointing at a
     mark shows its name above it;
+  - lyrics, now playing and the queue, three switches. The lyrics button opens now
+    playing on the lyrics (and turns the view's lyrics toggle on), switches an open
+    view to them, or closes a view that shows them. It is disabled while the track
+    has no lyrics, and in the accent while the view shows them;
   - the sleep timer, a moon next to the queue button. Its menu offers "End of this
     track" and 15, 30, 45, 60 and 90 minutes, plus "Turn off sleep timer" while one
     is on. While it is on the moon is in the accent; while it counts down, the minutes
@@ -843,10 +909,13 @@ The Albums page tells apart why it is empty:
     A timer that runs out while nothing plays just ends, and Stop, or playback
     stopping by itself, ends a running one. It counts in whole minutes on a Slint
     timer and isn't saved.
-- **Width at 720 px** (at 100 % zoom): the bar's three parts have fixed minimums: 136 px for the
-  track, 240 px for the controls and 256 px for the buttons and volume. With its
-  padding and gaps that is exactly 720 px; another button on the right needs room
-  taken elsewhere (`smallest_window_keeps_everything_inside` checks it).
+- **Width at 720 px** (at 100 % zoom): the bar's three parts have fixed minimums: 120 px for the
+  track, 240 px for the controls and 272 px for the buttons and volume (five 40 px
+  buttons, 4 px apart, and a volume slider of at least 52 px). With its padding and
+  gaps that is exactly 720 px; another button on the right needs room taken
+  elsewhere (`smallest_window_keeps_everything_inside` checks it). The gaps can't
+  depend on the window's width: the bar's minimum feeds the window's, so Slint sees
+  a binding loop.
 - **Seeking** moves the bar to the new position at once. Positions the engine sent
   before it took the seek are ignored for up to a second, so the bar doesn't jump
   back.
@@ -951,7 +1020,8 @@ The Albums page tells apart why it is empty:
     the steps between the engine's positions while playing, so pauses and the part
     a seek jumps over add nothing (a step back, or of more than 2 s, is a jump). A
     repeated track is a new play; going back within a play does not scrobble it
-    twice. Tracks without an artist tag are not scrobbled.
+    twice. Tracks without an artist tag are not scrobbled, but count for the play
+    history (see [Play history](#play-history)).
   - Counted plays wait in the library's `scrobble_queue` and go out in batches of
     up to 50, so they survive a restart or a day offline. After a failure the
     scrobbler waits 30 s, then twice as long each time up to 30 minutes; a "now
@@ -962,11 +1032,39 @@ The Albums page tells apart why it is empty:
     Disconnecting forgets the key and the plays not sent, which the row says while
     any wait.
   - "Now playing" goes out each time a track starts or resumes, and is not retried.
-    Tracks are not loved. Nothing is sent or kept while no account is connected.
+    Nothing is sent or kept while no account is connected.
+  - **Love on Last.fm** (a switch under the Last.fm row while an account is
+    connected, off by default, saved as `lastfm.love`): while on, a track that gains
+    a heart is loved on Last.fm (`track.love`) and one that loses it is unloved
+    (`track.unlove`), from any heart or menu. `Hearts::set` tells `LastfmService`
+    through `LoveSink`, only of the tracks whose heart changed. Tracks without an
+    artist tag are not sent, as they are not scrobbled. Switching it on sends
+    nothing for earlier hearts.
+  - Loves wait in the library's `love_queue`, one entry per artist and title, so a
+    heart given and taken away before it went out sends only the unlove. They go
+    out one at a time after the plays, with the plays' backoff; one Last.fm refuses
+    is dropped. Switching the switch off keeps the loves waiting, which still go
+    out (they were given while it was on; the owner's choice, 2026-11-07). A revoked
+    key keeps them; disconnecting drops them. The row says "N loves and unloves
+    wait to be sent" on a line of its own while any wait.
+  - **Import loved tracks from Last.fm** (a button under the switch): the
+    scrobbler thread reads the account's loved tracks (`user.getLovedTracks`, a
+    plain GET without a session key, 200 a page), one page each time round so
+    plays and loves are not held up. A page that fails because Last.fm is busy or
+    unreachable is tried three times. Once every page is in, the store likes every
+    library track, available or not, whose artist and title match a loved track,
+    ignoring case, accents and spacing (`lastfm::match_key`: compatibility
+    decomposition, combining marks dropped, lowercase). Each like takes Last.fm's
+    love date; a track liked already keeps its time. It only adds, sends no loves,
+    and can run again. While it runs the row says "Reading your loved tracks, page
+    X of Y…" and the button is disabled (the owner's choice, 2026-11-07); after, it
+    says how many loved tracks are in Favourites now and how many matched no
+    library track, or why it failed. `Hearts::refresh` then shows the new hearts.
   - Requests, the keyring and the scrobbler's own database connection live on the
     `vcmp-lastfm` thread; its reports come back to the UI thread. Tests replace it
-    with a recorder (`LastfmWorker`) and the browser with another, and
-    `PlayerService` hands plays over through `ScrobbleSink`.
+    with a recorder (`LastfmWorker`) and the browser with another,
+    `PlayerService` hands plays over through `ScrobbleSink`, and `Hearts` hands
+    hearts over through `LoveSink`.
   - The API key and shared secret are compiled in from `VCMP_LASTFM_API_KEY` and
     `VCMP_LASTFM_SHARED_SECRET` (docs/development.md, "Integration keys"). Without
     both there is no row and nothing is sent.
@@ -1057,7 +1155,7 @@ global. The player bar stays usable, as with the other dialogs.
   with `VCMP_SETUP=skip` (which writes nothing), it doesn't open. After that only
   "Run setup again", the first row of Settings, opens it.
 - **Steps:** Welcome, Music folders (`LibrarySection` without its heading), Look
-  (the built-in themes and the accent, without theme files; zoom; reduce motion), Online services (Show on Discord, Last.fm, the
+  (the built-in themes and the accent, without theme files; zoom; reduce motion), Online services (Show on Discord, Find lyrics online, Last.fm, the
   update check, the fanart.tv key, each only in builds that have it, and the AI
   agents switch), Done (the scan's state and where everything is). The rows are
   Settings' own components on the same globals, so every choice applies and saves
@@ -1187,7 +1285,9 @@ owned by `LibraryView`) answers the `Favourites` global.
   database, reads the liked set again, and writes the liked flag of every row on
   screen that changed (track lists, the songs table, the queue), the player bar's
   heart, and the Favourites card and page. Rows are updated in place rather than
-  rebuilt, so a heart answers at once even with the songs table loaded.
+  rebuilt, so a heart answers at once even with the songs table loaded. The tracks
+  whose heart changed go to the `LoveSink` (Last.fm, when "Love on Last.fm" is on).
+  `Hearts::refresh` shows likes made elsewhere: the import of Last.fm loves.
 - **Rows** (`TrackRow`, `SongRow`, `QueueRow`) carry the track's id and a liked
   flag; builders read `favourites::liked(track)` as they read labels' chips.
 - **Hearts** sit in track lists (album, artist, playlist, label, search and folder
@@ -1210,6 +1310,62 @@ owned by `LibraryView`) answers the `Favourites` global.
   takes it off the page at once, without asking. It plays as a context of its own
   (`favourites`, "Next from Favourites" in the queue panel). Empty, it says how to
   like a track.
+
+## Library check
+
+The finder for duplicates, missing tags and missing covers
+([library check spec](specs/2026-11-07-library-check.md), the rules in
+[library.md](library.md#library-check)). Settings shows a "Library check" row under
+Music folders once there are folders; its "Check library…" button opens the page in
+place of Settings (`LibraryCheck.open`), a place of its own in the history, so Back
+returns to Settings. The page's back button and Escape do the same, and the
+sidebar's Settings entry shows Settings.
+
+- **Read when it opens.** `CheckPage` (owned by `LibraryView`) runs the three checks
+  when the page opens and again on every library reload while it is open, so a tag
+  edit, a found cover or a scan updates it. Nothing is cached between visits.
+- **Tabs** (a `SegmentedChoice`): Duplicates, Missing tags and Missing covers, each
+  with its count, and a line saying its rule. Each lists 100 groups or albums, and
+  "Show more" adds 100 more, so a library missing thousands of years doesn't build
+  thousands of rows at once.
+- **Duplicates:** each group is headed by its title, artist and number of copies,
+  with "Not duplicates". Each copy shows its album, format and length, and its path
+  with the middle left out when long (the full path is its spoken description).
+  Once a group is marked, a switch shows the hidden groups, each with "Show again".
+- **Missing tags:** one block per album, headed by the album (Unknown for an
+  Unknown album) and its artist, with "Edit tags…" for every track the block lists.
+  Each track shows what it lacks as words ("No year"), not by colour.
+- **Missing covers:** one row per album with "Find cover online", which opens the
+  cover picker over the page (`CoverSearch.find-album`).
+- **Actions on a track:** Play (a duplicate plays its group from that copy, with no
+  context; a track missing tags plays its album from that track, "Next from" the
+  album), "Edit tags…" (the tag editor for that track) and Show in the file manager
+  (`vcmp_integrations::file_manager::reveal`: Explorer `/select` on Windows,
+  `open -R` on macOS, the `FileManager1` D-Bus call on Linux, the folder where no
+  file manager answers). The page never writes, moves or removes a file itself.
+
+## Play history
+
+The agreed decisions are in the
+[play history spec](specs/2026-11-07-play-history.md); storage is in
+[library.md](library.md#play-history).
+
+- **What counts:** the Last.fm rule above, followed by `PlayerService` for every
+  library track (one with a track id), artist tag or not, whether Last.fm is
+  connected, disconnected or not built in. Files outside the library are never
+  recorded. A play is recorded once, when the rule is met, with the moment it
+  started; Last.fm then gets it too if the track has an artist. Each pass of
+  Repeat One is its own play; Previous late in a track is a seek and stays the
+  same play. The player bar's Last.fm mark is about Last.fm only.
+- **Origin:** the engine's `NowPlaying.origin`, the key the app gave the context
+  (`album:12`, `search`, ...), or none for a track taken from Up next.
+- **Writing** is one insert on the UI thread per counted play; a failure is logged
+  and the play is lost, never playback.
+- **Showing:** the Songs page's Plays, Last played and Added columns, hidden until
+  turned on from the header menu (see [Songs page](#songs-page)).
+- **Clearing:** Settings, Playback, "Clear play history..." asks first
+  (`Confirmation`) and then deletes every play; the scrobbles waiting for Last.fm
+  and the added dates stay.
 
 ## Menus over lists
 
@@ -1338,7 +1494,12 @@ window's top left on Linux, so there is no shift to speak of.
   repository is private (GitHub answers 404). It runs once per start: a VCMP left
   open for days learns of a release at its next start.
 - Last.fm's API was exercised through scripted answers; connecting a real account
-  is still to be tried.
+  is still to be tried, and so are loving, unloving and the import. The page size
+  of 200 loved tracks is a guess at what `user.getLovedTracks` allows.
+- The import compares artist and title exactly once case, accents and spacing are
+  set aside: "feat." credits, punctuation or "(Remastered)" in one but not the
+  other make a track count as unmatched. The same song on two albums, or in two
+  formats, is liked on both.
 - On Linux the Last.fm key needs a Secret Service (GNOME Keyring, KWallet). Without
   one, an account stays connected until VCMP closes, and the row says so.
 - VCMP doesn't watch for the network coming back: queued plays wait out the backoff,
@@ -1356,3 +1517,8 @@ window's top left on Linux, so there is no shift to speak of.
   reduce_motion` prints what VCMP reads and, except on macOS, each change.
 - `examples/screenshots.rs` cannot force a window size under tiling window managers.
   Layout at the smallest window size is covered by a test instead.
+- The Library check runs its queries on the UI thread when the page opens and after
+  each library change while it is open; a very large library may pause the window
+  for a moment then.
+- The Library check lists 100 entries per tab and adds 100 more with "Show more"
+  rather than creating only the rows in view, as the songs table does.

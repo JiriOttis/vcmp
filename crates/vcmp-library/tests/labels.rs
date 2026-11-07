@@ -99,7 +99,7 @@ fn add_file(dir: &Path, name: &str, title: &str, album: &str) -> PathBuf {
     fs::copy(Path::new(FIXTURES).join("silence.flac"), &path).unwrap();
     let file = lofty::read_from_path(&path).unwrap();
     let tag_type = match file.file_type() {
-        FileType::Wav => TagType::Id3v2,
+        FileType::Wav | FileType::Aiff => TagType::Id3v2,
         _ => file.primary_tag_type(),
     };
     let mut tag = Tag::new(tag_type);
@@ -624,7 +624,9 @@ fn a_database_from_version_11_keeps_its_change_sets() {
     // can't be of kind 'labels'.
     let conn = rusqlite::Connection::open(&db).unwrap();
     conn.execute_batch(
-        "UPDATE change_sets SET kind = 'tags'; DROP TABLE favourites;
+        "UPDATE change_sets SET kind = 'tags'; DROP TABLE love_queue; DROP TABLE lyrics_lookups;
+         DROP TABLE plays; DROP TABLE not_duplicates;
+         DROP TABLE favourites;
          DROP TABLE change_labels; DROP TABLE track_labels; DROP TABLE labels;
          PRAGMA user_version = 11;",
     )

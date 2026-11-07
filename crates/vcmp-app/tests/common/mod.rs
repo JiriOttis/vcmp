@@ -10,9 +10,9 @@ use lofty::config::WriteOptions;
 use lofty::file::TaggedFileExt;
 use lofty::tag::{Accessor, ItemKey, Tag, TagExt};
 
-const FIXTURE: &str = concat!(
+const FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../vcmp-library/tests/fixtures/silence.flac"
+    "/../vcmp-library/tests/fixtures"
 );
 
 #[derive(Clone, Copy)]
@@ -38,11 +38,21 @@ impl<'a> Song<'a> {
     }
 }
 
-/// Copies the silent FLAC fixture to `dir/name` (creating `dir`) and tags it.
+/// Copies a silent fixture to `dir/name` (creating `dir`) and tags it: FLAC, or ALAC
+/// for a name ending in `.alac.m4a`, AAC for another `.m4a` and AIFF for `.aiff`.
 pub fn add(dir: &Path, name: &str, song: Song) {
     std::fs::create_dir_all(dir).unwrap();
     let path = dir.join(name);
-    std::fs::copy(FIXTURE, &path).unwrap();
+    let fixture = if name.ends_with(".alac.m4a") {
+        "silence-alac.m4a"
+    } else if name.ends_with(".m4a") {
+        "silence.m4a"
+    } else if name.ends_with(".aiff") {
+        "silence.aiff"
+    } else {
+        "silence.flac"
+    };
+    std::fs::copy(Path::new(FIXTURES).join(fixture), &path).unwrap();
     let file = lofty::read_from_path(&path).unwrap();
     let mut tag = Tag::new(file.primary_tag_type());
     tag.set_title(song.title.into());

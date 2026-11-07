@@ -1,7 +1,7 @@
 //! Back and forward through the places the window showed, as a browser does: the
 //! mouse's back and forward buttons (caught in `src/shortcuts.rs`) and Alt+Left and
 //! Alt+Right. A place is a section on its grid, or the album, artist, playlist or
-//! label page open in it.
+//! label page open in it, or the Library check open in place of Settings.
 //!
 //! The window calls `navigated` whenever the section or the page open in it changes,
 //! however that came about (the sidebar, a card, a back button, Escape, a link in the
@@ -18,7 +18,7 @@ use vcmp_library::{AlbumId, ArtistId, LabelId};
 
 use crate::library_view::LibraryView;
 use crate::playlists::PlaylistKey;
-use crate::{AppWindow, Page};
+use crate::{AppWindow, LibraryCheck, Page};
 
 /// The most places kept behind.
 const LIMIT: usize = 100;
@@ -34,6 +34,8 @@ pub enum Place {
     /// A playlist's page, or the favourites'.
     Playlist(PlaylistKey),
     Label(LabelId),
+    /// The Library check, opened from Settings.
+    LibraryCheck,
 }
 
 pub struct History {
@@ -92,6 +94,7 @@ impl History {
                 Place::Playlist(self.view.playlists().shown()?.key)
             }
             Page::Labels if window.get_label_open() => Place::Label(self.view.labels().shown()?.id),
+            Page::Settings if window.global::<LibraryCheck>().get_open() => Place::LibraryCheck,
             other => Place::Section(other),
         };
         Some(place)
@@ -160,6 +163,10 @@ impl History {
             Place::Label(label) => {
                 window.invoke_show_section(section(Page::Labels));
                 self.view.labels().open(label);
+            }
+            Place::LibraryCheck => {
+                window.invoke_show_section(section(Page::Settings));
+                self.view.check().open();
             }
         }
         // A page that is gone (an album removed meanwhile) leaves the window where

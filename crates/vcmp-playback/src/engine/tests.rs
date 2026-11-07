@@ -320,7 +320,7 @@ fn assert_fade_then_silence(samples: &[f32]) {
 
 fn tolerance(extension: &str) -> f32 {
     match extension {
-        "wav" | "flac" => 1e-4,
+        "wav" | "flac" | "aiff" | "alac.m4a" => 1e-4,
         "ogg" => 0.03,
         _ => 0.1,
     }
@@ -328,7 +328,7 @@ fn tolerance(extension: &str) -> f32 {
 
 #[test]
 fn an_album_plays_gaplessly_sample_for_sample() {
-    for extension in ["wav", "flac", "mp3", "ogg"] {
+    for extension in ["wav", "flac", "mp3", "ogg", "aiff", "alac.m4a"] {
         let mut h = Harness::new(CD);
         let (a, b) = (file("a", extension), file("b", extension));
         h.play_context(vec![a.clone(), b.clone()]);
@@ -410,6 +410,39 @@ fn play_next_replaces_the_prepared_track() {
     h.wait_for_track(Some(&inserted));
     h.wait_for_track(Some(&b));
     h.wait_for_track(None);
+}
+
+#[test]
+fn a_track_names_its_context_unless_it_came_from_up_next() {
+    let mut h = Harness::new(CD);
+    let (a, b, inserted) = (file("a", "flac"), file("b", "flac"), file("a", "wav"));
+    h.send(Command::PlayContext {
+        entries: vec![a.clone(), b.clone()],
+        origin: Some("album:7".into()),
+        start: None,
+    });
+    h.wait_until_buffered(TOTAL);
+    h.send(Command::PlayNext(vec![inserted.clone()]));
+    h.wait_for(
+        "queue change",
+        |e| matches!(e, Event::QueueChanged(view) if view.up_next.len() == 1),
+    );
+    h.play_to_end();
+    h.wait_for_track(None);
+    let origins: Vec<(QueueEntry, Option<String>)> = h
+        .seen
+        .iter()
+        .filter_map(|(event, _)| match event {
+            Event::TrackChanged(Some(now)) => Some((now.entry.clone(), now.origin.clone())),
+            _ => None,
+        })
+        .collect();
+    let album = Some("album:7".to_string());
+    assert_eq!(
+        origins,
+        [(a, album.clone()), (inserted, None), (b, album)],
+        "the inserted track came from Up next"
+    );
 }
 
 #[test]
