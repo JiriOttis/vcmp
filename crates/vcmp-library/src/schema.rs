@@ -408,6 +408,20 @@ CREATE TABLE lyrics_lookups (
     PRIMARY KEY (source, track)
 ) STRICT;
 "#,
+    r#"
+-- Loves (love = 1) and unloves (love = 0) Last.fm has not received yet, oldest
+-- first. Like scrobbles they hold the artist and title as they were, which is how
+-- Last.fm knows a track. One entry per track: a newer one replaces it with a new id,
+-- so like-then-unlike sends only the unlove, and an entry being sent as it is
+-- replaced is not taken for the newer one.
+CREATE TABLE love_queue (
+    id INTEGER PRIMARY KEY,
+    artist TEXT NOT NULL,
+    title TEXT NOT NULL,
+    love INTEGER NOT NULL,
+    UNIQUE (artist, title)
+) STRICT;
+"#,
 ];
 
 pub(crate) const VERSION: i64 = MIGRATIONS.len() as i64;

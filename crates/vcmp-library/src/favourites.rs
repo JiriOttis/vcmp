@@ -49,6 +49,41 @@ impl Library {
         Ok(())
     }
 
+    /// Likes each track as of its time (Last.fm's love date, for an import); those
+    /// liked already keep their own time. Returns how many were liked now.
+    pub fn like_at(&self, tracks: &[(TrackId, SystemTime)]) -> Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut liked = 0;
+        for (track, at) in tracks {
+            let at_ms = at
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            liked += self
+                .conn
+                .prepare_cached(
+                    "INSERT OR IGNORE INTO favourites (track_id, liked_ms)
+                     SELECT id, ?2 FROM tracks WHERE id = ?1",
+                )?
+                .execute(params![track.0, at_ms])?;
+        }
+        tx.commit()?;
+        Ok(liked)
+    }
+
+    /// Every track's id, artist and title, available or not, for tracks that have an
+    /// artist: what a Last.fm import matches loved tracks against.
+    pub fn track_names(&self) -> Result<Vec<(TrackId, String, String)>> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT id, artist, title FROM tracks WHERE artist IS NOT NULL")?;
+        Ok(statement
+            .query_map([], |row| {
+                Ok((TrackId(row.get(0)?), row.get(1)?, row.get(2)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Takes the tracks out of the favourites; those not liked are left alone.
     pub fn unlike(&self, tracks: &[TrackId]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;

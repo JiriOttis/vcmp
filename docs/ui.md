@@ -60,9 +60,9 @@ DESIGN.md).
 | `src/player_service.rs` | `PlayerService`: commands to the playback engine, its events into `PlayerState` |
 | `src/player_service/lyrics.rs` | The playing track's lyrics: read off the UI thread, LRCLIB asked through the cache, the line playing timed from the positions |
 | `src/saved_queue.rs` | The queue kept across restarts, as versioned JSON in the settings |
-| `ui/lastfm-state.slint` | `LastfmState` global: whether the build has Last.fm, the account, connecting, and what went wrong |
-| `ui/lastfm-settings.slint` | `LastfmRow`: the Last.fm setting and its Connect, Cancel or Disconnect button |
-| `src/lastfm_service.rs` | `LastfmService`: the Last.fm row, the account, and plays into the scrobble queue |
+| `ui/lastfm-state.slint` | `LastfmState` global: whether the build has Last.fm, the account, connecting, what went wrong, "Love on Last.fm" and the import of loved tracks |
+| `ui/lastfm-settings.slint` | `LastfmRow`: the Last.fm setting and its Connect, Cancel or Disconnect button; `LastfmLoveRow` and `LastfmImportRow`, shown while an account is connected |
+| `src/lastfm_service.rs` | `LastfmService`: the Last.fm rows, the account, plays into the scrobble queue, hearts into the love queue, and the import's progress and result |
 | `ui/app-window.slint` | `AppWindow`: sidebar, current-page marker, content area |
 | `ui/updates.slint` | `UpdateState` global, `UpdateLink`, the sidebar's update note, `UpdateCheckRow` and the Updates section of Settings |
 | `ui/agents.slint` | `AgentState` global, `AgentsSwitchRow`, the AI agents section of Settings (switch, connection, the playback switch, backups), `ChangeHistory` (the dialog listing the changes by agents), the sidebar's review note and `ChangeReview`, the dialog that reviews a change, with `ChangeTable` for each file's changes |
@@ -1032,11 +1032,39 @@ The Albums page tells apart why it is empty:
     Disconnecting forgets the key and the plays not sent, which the row says while
     any wait.
   - "Now playing" goes out each time a track starts or resumes, and is not retried.
-    Tracks are not loved. Nothing is sent or kept while no account is connected.
+    Nothing is sent or kept while no account is connected.
+  - **Love on Last.fm** (a switch under the Last.fm row while an account is
+    connected, off by default, saved as `lastfm.love`): while on, a track that gains
+    a heart is loved on Last.fm (`track.love`) and one that loses it is unloved
+    (`track.unlove`), from any heart or menu. `Hearts::set` tells `LastfmService`
+    through `LoveSink`, only of the tracks whose heart changed. Tracks without an
+    artist tag are not sent, as they are not scrobbled. Switching it on sends
+    nothing for earlier hearts.
+  - Loves wait in the library's `love_queue`, one entry per artist and title, so a
+    heart given and taken away before it went out sends only the unlove. They go
+    out one at a time after the plays, with the plays' backoff; one Last.fm refuses
+    is dropped. Switching the switch off keeps the loves waiting, which still go
+    out (they were given while it was on; the owner's choice, 2026-11-07). A revoked
+    key keeps them; disconnecting drops them. The row says "N loves and unloves
+    wait to be sent" on a line of its own while any wait.
+  - **Import loved tracks from Last.fm** (a button under the switch): the
+    scrobbler thread reads the account's loved tracks (`user.getLovedTracks`, a
+    plain GET without a session key, 200 a page), one page each time round so
+    plays and loves are not held up. A page that fails because Last.fm is busy or
+    unreachable is tried three times. Once every page is in, the store likes every
+    library track, available or not, whose artist and title match a loved track,
+    ignoring case, accents and spacing (`lastfm::match_key`: compatibility
+    decomposition, combining marks dropped, lowercase). Each like takes Last.fm's
+    love date; a track liked already keeps its time. It only adds, sends no loves,
+    and can run again. While it runs the row says "Reading your loved tracks, page
+    X of Y…" and the button is disabled (the owner's choice, 2026-11-07); after, it
+    says how many loved tracks are in Favourites now and how many matched no
+    library track, or why it failed. `Hearts::refresh` then shows the new hearts.
   - Requests, the keyring and the scrobbler's own database connection live on the
     `vcmp-lastfm` thread; its reports come back to the UI thread. Tests replace it
-    with a recorder (`LastfmWorker`) and the browser with another, and
-    `PlayerService` hands plays over through `ScrobbleSink`.
+    with a recorder (`LastfmWorker`) and the browser with another,
+    `PlayerService` hands plays over through `ScrobbleSink`, and `Hearts` hands
+    hearts over through `LoveSink`.
   - The API key and shared secret are compiled in from `VCMP_LASTFM_API_KEY` and
     `VCMP_LASTFM_SHARED_SECRET` (docs/development.md, "Integration keys"). Without
     both there is no row and nothing is sent.
@@ -1257,7 +1285,9 @@ owned by `LibraryView`) answers the `Favourites` global.
   database, reads the liked set again, and writes the liked flag of every row on
   screen that changed (track lists, the songs table, the queue), the player bar's
   heart, and the Favourites card and page. Rows are updated in place rather than
-  rebuilt, so a heart answers at once even with the songs table loaded.
+  rebuilt, so a heart answers at once even with the songs table loaded. The tracks
+  whose heart changed go to the `LoveSink` (Last.fm, when "Love on Last.fm" is on).
+  `Hearts::refresh` shows likes made elsewhere: the import of Last.fm loves.
 - **Rows** (`TrackRow`, `SongRow`, `QueueRow`) carry the track's id and a liked
   flag; builders read `favourites::liked(track)` as they read labels' chips.
 - **Hearts** sit in track lists (album, artist, playlist, label, search and folder
@@ -1464,7 +1494,12 @@ window's top left on Linux, so there is no shift to speak of.
   repository is private (GitHub answers 404). It runs once per start: a VCMP left
   open for days learns of a release at its next start.
 - Last.fm's API was exercised through scripted answers; connecting a real account
-  is still to be tried.
+  is still to be tried, and so are loving, unloving and the import. The page size
+  of 200 loved tracks is a guess at what `user.getLovedTracks` allows.
+- The import compares artist and title exactly once case, accents and spacing are
+  set aside: "feat." credits, punctuation or "(Remastered)" in one but not the
+  other make a track count as unmatched. The same song on two albums, or in two
+  formats, is liked on both.
 - On Linux the Last.fm key needs a Secret Service (GNOME Keyring, KWallet). Without
   one, an account stays connected until VCMP closes, and the row says so.
 - VCMP doesn't watch for the network coming back: queued plays wait out the backoff,

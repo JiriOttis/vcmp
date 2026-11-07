@@ -56,6 +56,9 @@ fn main() -> Result<(), slint::PlatformError> {
                         &paths,
                         Credentials::built_in(),
                     );
+                    if let Some(lastfm) = &lastfm {
+                        lastfm.attach(view.hearts());
+                    }
                     let tag_editor = TagEditor::connect(
                         &window,
                         library.clone(),

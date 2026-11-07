@@ -28,14 +28,15 @@ A player for the music files on your own drives, for Windows 10 and newer and Li
   your files.
 - Favourites: like a track with the heart in a track list or the player bar, or a
   whole album from its menu. Liked tracks gather in a Favourites playlist, first
-  among your playlists, newest first, which you can play, shuffle or export.
+  among your playlists, newest first, which you can play, shuffle or export. With
+  Last.fm connected, your hearts can be loved there too, and the tracks you loved
+  on Last.fm can be brought into Favourites.
 - Exports a playlist as an M3U file for other players, phones or a backup, and
   imports M3U playlists made elsewhere: their tracks are found in your library by
   path, or by artist and title, and the import lists what it couldn't find.
 - A library check in Settings lists duplicate tracks, tracks with missing tags and
   albums without a cover, so you can play, edit or look them up. It never deletes
   anything.
-
 - Remembers what you play: how often and when each track was last played, and
   when it came into your library, as columns you can turn on and sort by in Songs.
   Settings can clear the history.

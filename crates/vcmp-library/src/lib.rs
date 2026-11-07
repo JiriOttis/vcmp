@@ -19,6 +19,7 @@ mod error;
 mod favourites;
 mod labels;
 mod lookups;
+mod loves;
 mod lyrics;
 mod m3u;
 mod other_tags;
@@ -48,6 +49,7 @@ pub use error::{Error, Result};
 pub use favourites::{Favourite, FavouritesSummary};
 pub use labels::{LABEL_NAME_MAX, LABEL_PALETTE, Label, LabelId, valid_label_colour};
 pub use lookups::{CoverArtId, CoverLookup};
+pub use loves::{Love, QueuedLove};
 pub use lyrics::{
     LYRICS_RETRY_NOT_FOUND, LocalLyrics, LyricLine, Lyrics, LyricsKey, LyricsLookup, LyricsQuery,
     LyricsSource, LyricsText, OnlineLyrics, choose_lyrics, lyrics_lookup_due, parse_lrc,

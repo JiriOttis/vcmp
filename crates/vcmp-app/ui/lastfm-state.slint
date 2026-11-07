@@ -21,6 +21,19 @@ export enum LastfmProblem {
     browser,
 }
 
+// How the last import of loved tracks ended.
+export enum LastfmImport {
+    // None ran since VCMP started, or one runs now.
+    none,
+    done,
+    // Last.fm refused or could not be reached.
+    failed,
+    // The library could not like the matching tracks.
+    not-liked,
+    // No account was connected by the time it started.
+    no-account,
+}
+
 export global LastfmState {
     // Built with VCMP's Last.fm API key; without one, Settings shows no Last.fm row.
     in property <bool> available;
@@ -33,9 +46,27 @@ export global LastfmState {
     // The technical detail of the problem, from Last.fm or the system.
     in property <string> problem-detail;
 
+    // Hearts given while on are loved (and taken away, unloved) on Last.fm too.
+    in property <bool> love;
+    // Loves and unloves waiting to be sent.
+    in property <int> unsent-loves;
+
+    // Importing loved tracks: the pages read so far, of how many.
+    in property <bool> importing;
+    in property <int> import-page;
+    in property <int> import-pages;
+    in property <LastfmImport> import-result;
+    // Loved tracks that matched at least one library track, and those that matched none.
+    in property <int> import-matched;
+    in property <int> import-unmatched;
+    // The technical detail of a failed import.
+    in property <string> import-detail;
+
     callback connect();
     callback cancel();
     callback disconnect();
     // Opens the page where the user allows VCMP again, while waiting.
     callback open-auth-page();
+    callback set-love(bool);
+    callback import-loved();
 }

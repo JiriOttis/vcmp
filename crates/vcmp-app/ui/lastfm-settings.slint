@@ -1,6 +1,52 @@
 import { Theme } from "theme.slint";
-import { Button, TextLink } from "components.slint";
-import { LastfmProblem, LastfmState, LastfmStatus } from "lastfm-state.slint";
+import { Button, SettingRow, TextLink, Toggle } from "components.slint";
+import { LastfmImport, LastfmProblem, LastfmState, LastfmStatus } from "lastfm-state.slint";
+
+// "Love on Last.fm": hearts given from now on are loved there too. Shown while an
+// account is connected.
+export component LastfmLoveRow inherits SettingRow {
+    title: @tr("Love on Last.fm");
+    description: @tr("Tracks you add to Favourites from now on are loved on Last.fm too, and removing them unloves them there. Tracks already in Favourites are not sent.");
+    forward-focus: toggle;
+
+    toggle := Toggle {
+        label: @tr("Love on Last.fm");
+        checked: LastfmState.love;
+        toggled(on) => {
+            LastfmState.set-love(on);
+        }
+    }
+}
+
+// "Import loved tracks from Last.fm": likes the library tracks the account loved,
+// with the pages read while it runs and what matched afterwards.
+export component LastfmImportRow inherits SettingRow {
+    private property <LastfmImport> result: LastfmState.import-result;
+    private property <string> matched: @tr("{n} loved track is in Favourites now." | "{n} loved tracks are in Favourites now." % LastfmState.import-matched);
+    private property <string> unmatched: @tr("{n} loved track matched no track in your library." | "{n} loved tracks matched no track in your library." % LastfmState.import-unmatched);
+
+    title: @tr("Import loved tracks from Last.fm");
+    description: LastfmState.importing
+        ? (LastfmState.import-pages > 0
+        ? @tr("Reading your loved tracks, page {0} of {1}…", LastfmState.import-page, LastfmState.import-pages)
+        : @tr("Reading your loved tracks…"))
+        // Two sentences, the second only when some matched nothing.
+        : root.result == LastfmImport.done ? (LastfmState.import-unmatched > 0 ? @tr("{0} {1}", root.matched, root.unmatched) : root.matched)
+        : root.result == LastfmImport.failed ? @tr("VCMP couldn't read your loved tracks from Last.fm: {}", LastfmState.import-detail)
+        : root.result == LastfmImport.not-liked ? @tr("VCMP couldn't add the matching tracks to Favourites: {}", LastfmState.import-detail)
+        : root.result == LastfmImport.no-account ? @tr("Connect a Last.fm account to import its loved tracks.")
+        : @tr("Adds the tracks in your library that you loved on Last.fm to Favourites, matched by artist and title. It never removes anything, and you can run it again.");
+    forward-focus: button;
+
+    button := Button {
+        text: LastfmState.importing ? @tr("Importing…") : @tr("Import");
+        label: @tr("Import loved tracks from Last.fm");
+        enabled: !LastfmState.importing;
+        clicked => {
+            LastfmState.import-loved();
+        }
+    }
+}
 
 // The Last.fm setting: connect an account, wait while the user allows VCMP in the
 // browser, then show who scrobbles. Laid out like SettingRow, with room for the
@@ -50,6 +96,14 @@ export component LastfmRow {
 
             if root.connected && LastfmState.unsent > 0: Text {
                 text: @tr("{n} play waits to be sent; disconnecting drops it." | "{n} plays wait to be sent; disconnecting drops them." % LastfmState.unsent);
+                color: Theme.colors.text-muted;
+                font-size: Theme.font-small;
+                wrap: word-wrap;
+                min-height: self.preferred-height;
+            }
+
+            if root.connected && LastfmState.unsent-loves > 0: Text {
+                text: @tr("{n} love or unlove waits to be sent; disconnecting drops it." | "{n} loves and unloves wait to be sent; disconnecting drops them." % LastfmState.unsent-loves);
                 color: Theme.colors.text-muted;
                 font-size: Theme.font-small;
                 wrap: word-wrap;

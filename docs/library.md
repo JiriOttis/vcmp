@@ -38,7 +38,7 @@ path (see [Writing tags](#writing-tags)), and `Library::accept_change_set` (see
 
 ## Schema
 
-Version 16, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
+Version 17, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
 migrations; a database from a newer build is refused instead of being altered.
 Migrations run with foreign keys off (`Library::open` turns them on afterwards), so
 a migration that rebuilds a table, as version 12 rebuilds `change_sets` to widen
@@ -71,6 +71,7 @@ the CHECK on its kind, doesn't delete the rows that refer to it.
 | `not_duplicates` | Duplicate groups the owner marked "Not duplicates": one row per track, with a group id shared by the tracks marked together (version 14; see [Library check](#library-check)) |
 | `plays` | Every play that counted: track, when it started and the origin of the context it played from, indexed by track and time and by time (version 15; see [Play history](#play-history)) |
 | `lyrics_lookups` | What LRCLIB answered for a track (LRC text, plain text, or nothing), the question it answered (title, artist, album, duration in seconds) and when, keyed by source and track id (`local` and the library track id) rather than a reference (version 16; see [Lyrics](#lyrics)) |
+| `love_queue` | Loves and unloves waiting to be sent to Last.fm: artist, title and love or unlove, oldest first, one row per artist and title (version 17). A newer entry replaces the waiting one with a new id, so the one being sent as it is replaced isn't mistaken for it |
 
 Paths are stored as platform-native bytes (`src/path_codec.rs`), so file names that
 aren't valid UTF-8 keep working.
@@ -639,6 +640,15 @@ only. The agreed decisions are in the
   and `favourites_summary` (count, available count, duration, for the card).
 - **M3U export:** `Library::export_favourites` writes them newest first through the
   same writer as `export_playlist`.
+- **Last.fm import:** `like_at` likes tracks as of given times (Last.fm's love
+  dates); a track liked already keeps its own time, and an id that is no track is
+  skipped. `track_names` gives every track's id, artist and title, available or
+  not, for the tracks with an artist; the matching itself is
+  `vcmp_integrations::lastfm::match_loved` ([ui.md](ui.md#playback), "Last.fm
+  scrobbling").
+- **Love queue** (`src/loves.rs`): `queue_loves`, `queued_loves`,
+  `queued_love_count`, `remove_loves` and `clear_loves`, like the scrobble queue.
+  Loves hold the artist and title as they were, which is how Last.fm knows a track.
 
 ## Library check
 
