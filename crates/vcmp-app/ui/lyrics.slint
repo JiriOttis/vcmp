@@ -1,0 +1,252 @@
+import { Theme } from "theme.slint";
+import { FocusRing } from "components.slint";
+import { PlayerState } from "player-state.slint";
+
+// One line of synced lyrics. The line playing is in the accent; a click plays from
+// its start.
+component LyricRow {
+    in property <string> text;
+    in property <bool> current;
+    in property <bool> focused;
+    // Bumped by the view when it wants the line playing shown again.
+    in property <int> recenter;
+    callback clicked();
+    // The row's place in the list and its height, when it becomes the line playing
+    // or the keyboard's.
+    callback shown-current(length, length);
+    callback shown-focused(length, length);
+
+    changed current => {
+        if self.current {
+            root.shown-current(self.y, self.height);
+        }
+    }
+    changed recenter => {
+        if self.current {
+            root.shown-current(self.y, self.height);
+        }
+    }
+    changed focused => {
+        if self.focused {
+            root.shown-focused(self.y, self.height);
+        }
+    }
+
+    accessible-role: list-item;
+    accessible-label: root.text;
+    accessible-item-selected: root.focused;
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    Rectangle {
+        border-radius: Theme.radius-m;
+        background: touch.has-hover ? Theme.colors.surface : transparent;
+    }
+
+    VerticalLayout {
+        padding: Theme.space-s;
+
+        Text {
+            text: root.text;
+            color: root.current ? Theme.colors.accent : touch.has-hover ? Theme.colors.text : Theme.colors.text-muted;
+            font-size: Theme.font-large;
+            font-weight: root.current ? Theme.weight-strong : Theme.weight-regular;
+            wrap: word-wrap;
+            min-height: self.preferred-height;
+            horizontal-alignment: center;
+            accessible-role: none;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            Theme.keyboard-navigation = false;
+            root.clicked();
+        }
+    }
+
+    if root.focused: FocusRing {
+        around-width: root.width;
+        around-height: root.height;
+        radius: Theme.radius-m;
+    }
+}
+
+// The playing track's lyrics in the now playing view. Synced lyrics keep the line
+// playing in the middle, gliding to each new line (jumping with reduced motion); a
+// click, or Enter on the keyboard's line, plays from a line. Plain lyrics scroll.
+// The lines are one tab stop: Up and Down, Page Up and Page Down, Home and End.
+export component LyricsView {
+    private property <int> count: PlayerState.lyrics-lines.length;
+    private property <int> cursor;
+    // Where the list glides to, and whether it is on its way.
+    private property <length> target-y;
+    private property <bool> gliding;
+    private property <int> recenter;
+    // Waits for the first layout before showing the line playing.
+    private property <bool> settling: true;
+
+    function scroll-to(y: length) {
+        let to = max(min(0px, flick.height - flick.content-height), min(0px, y));
+        if Theme.reduced-motion {
+            root.gliding = false;
+            flick.content-y = to;
+        } else {
+            root.target-y = to;
+            root.gliding = true;
+        }
+    }
+
+    function center-line(top: length, height: length) {
+        root.scroll-to(flick.height / 2 - top - height / 2);
+    }
+
+    function ensure-visible(top: length, height: length) {
+        if top + flick.content-y < 0 {
+            root.scroll-to(-top);
+        } else if top + height + flick.content-y > flick.height {
+            root.scroll-to(flick.height - top - height);
+        }
+    }
+
+    function scroll-by(by: length) {
+        root.gliding = false;
+        flick.content-y = max(min(0px, flick.height - flick.content-height), min(0px, flick.content-y - by));
+    }
+
+    changed count => {
+        root.cursor = max(0, min(root.cursor, root.count - 1));
+        root.gliding = false;
+        flick.content-y = 0;
+    }
+
+    forward-focus: list;
+    // It takes the room it is given, as `ScrollArea` does.
+    min-height: Theme.target-height * 3;
+    min-width: Theme.target-height * 3;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    preferred-height: 100%;
+    preferred-width: 100%;
+
+    Timer {
+        interval: Theme.drag-scroll-tick;
+        running: root.settling;
+        triggered => {
+            root.settling = false;
+            root.recenter += 1;
+        }
+    }
+
+    // A third of the way left each tick, as the mouse wheel glides (src/wheel.rs).
+    Timer {
+        interval: Theme.drag-scroll-tick;
+        running: root.gliding;
+        triggered => {
+            let left = root.target-y - flick.content-y;
+            if abs(left) <= 2px {
+                flick.content-y = root.target-y;
+                root.gliding = false;
+            } else {
+                flick.content-y += left / 3;
+            }
+        }
+    }
+
+    list := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        focus-on-click: false;
+        focus-gained(reason) => {
+            if reason == FocusReason.tab-navigation {
+                Theme.keyboard-navigation = true;
+            }
+            root.cursor = max(0, PlayerState.lyrics-current);
+        }
+        key-pressed(event) => {
+            if !PlayerState.lyrics-synced {
+                if event.text == Key.DownArrow {
+                    root.scroll-by(Theme.target-height);
+                } else if event.text == Key.UpArrow {
+                    root.scroll-by(-Theme.target-height);
+                } else if event.text == Key.PageDown {
+                    root.scroll-by(flick.height - Theme.target-height);
+                } else if event.text == Key.PageUp {
+                    root.scroll-by(Theme.target-height - flick.height);
+                } else if event.text == Key.Home {
+                    root.scroll-by(-flick.content-height);
+                } else if event.text == Key.End {
+                    root.scroll-by(flick.content-height);
+                } else {
+                    return reject;
+                }
+                return accept;
+            }
+            if root.count == 0 {
+                return reject;
+            }
+            if event.text == Key.DownArrow {
+                root.cursor = min(root.count - 1, root.cursor + 1);
+            } else if event.text == Key.UpArrow {
+                root.cursor = max(0, root.cursor - 1);
+            } else if event.text == Key.PageDown {
+                root.cursor = min(root.count - 1, root.cursor + 5);
+            } else if event.text == Key.PageUp {
+                root.cursor = max(0, root.cursor - 5);
+            } else if event.text == Key.Home {
+                root.cursor = 0;
+            } else if event.text == Key.End {
+                root.cursor = root.count - 1;
+            } else if event.text == Key.Return || event.text == Key.Space {
+                PlayerState.seek-to-lyric(root.cursor);
+            } else {
+                return reject;
+            }
+            accept
+        }
+
+        flick := Flickable {
+            width: parent.width;
+            height: parent.height;
+            mouse-drag-pan-enabled: false;
+            accessible-role: AccessibleRole.list;
+            accessible-label: @tr("Lyrics");
+
+            VerticalLayout {
+                width: flick.width;
+                // The first and last synced lines can come to the middle.
+                padding-top: PlayerState.lyrics-synced ? flick.height / 3 : 0;
+                padding-bottom: PlayerState.lyrics-synced ? flick.height / 3 : 0;
+                spacing: Theme.space-xs;
+
+                for line[index] in PlayerState.lyrics-lines: LyricRow {
+                    text: line;
+                    current: index == PlayerState.lyrics-current;
+                    focused: list.has-focus && index == root.cursor;
+                    recenter: root.recenter;
+                    clicked => {
+                        root.cursor = index;
+                        PlayerState.seek-to-lyric(index);
+                    }
+                    shown-current(top, height) => {
+                        root.center-line(top, height);
+                    }
+                    shown-focused(top, height) => {
+                        root.ensure-visible(top, height);
+                    }
+                }
+
+                if !PlayerState.lyrics-synced: Text {
+                    text: PlayerState.lyrics-text;
+                    color: Theme.colors.text;
+                    font-size: Theme.font-large;
+                    wrap: word-wrap;
+                    min-height: self.preferred-height;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                }
+            }
+        }
+    }
+}

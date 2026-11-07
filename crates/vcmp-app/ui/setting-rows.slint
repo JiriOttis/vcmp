@@ -20,6 +20,20 @@ export component DiscordRow inherits SettingRow {
     }
 }
 
+export component LyricsOnlineRow inherits SettingRow {
+    title: @tr("Find lyrics online");
+    description: @tr("When the playing track has no synced lyrics of its own, they are looked up on lrclib.net, which receives the track's title, artist, album and length. Answers are kept, so a track is looked up again only when its tags change.");
+    forward-focus: toggle;
+
+    toggle := Toggle {
+        label: @tr("Find lyrics online");
+        checked: PlayerState.lyrics-online;
+        toggled(on) => {
+            PlayerState.set-lyrics-online(on);
+        }
+    }
+}
+
 export component ZoomRow inherits SettingRow {
     title: @tr("Zoom");
     description: @tr("Makes everything larger or smaller than your operating system's display scale. Ctrl+= and Ctrl+- zoom too, and Ctrl+0 goes back to 100%.");

@@ -320,6 +320,9 @@ export component PlayerBar inherits Rectangle {
     // The play will be or was scrobbled to a connected account.
     private property <bool> scrobble-shown: PlayerState.scrobble != ScrobbleMark.none && LastfmState.status == LastfmStatus.connected;
 
+    // Below this the bar's gaps narrow, so everything fits down to 720 px.
+    private property <bool> narrow: root.width < 800px;
+
     background: Theme.colors.mantle;
     height: 88px;
 
@@ -333,7 +336,8 @@ export component PlayerBar inherits Rectangle {
     HorizontalLayout {
         padding-left: Theme.space-l;
         padding-right: Theme.space-xl;
-        spacing: Theme.space-xl;
+        // Narrower gaps leave the buttons room at 720 px (docs/ui.md, "Playback").
+        spacing: root.narrow ? Theme.space-l : Theme.space-xl;
 
         // What is playing. The title and the cover lead to the album, the artist
         // to the artist; the cover is for the pointer, the title the keyboard's way.
@@ -573,14 +577,39 @@ export component PlayerBar inherits Rectangle {
             }
         }
 
-        // The now playing view's and the queue panel's switches, the sleep timer and the
-        // volume.
+        // Lyrics, the now playing view's and the queue panel's switches, the sleep timer
+        // and the volume.
         HorizontalLayout {
-            min-width: 256px;
-            preferred-width: 280px;
+            min-width: root.narrow ? 272px : 304px;
+            preferred-width: 328px;
             horizontal-stretch: 1;
             alignment: end;
-            spacing: Theme.space-s;
+            spacing: root.narrow ? Theme.space-xs : Theme.space-s;
+
+            // Opens now playing on the lyrics, switches it to them, or closes it when
+            // it shows them. Disabled while the track has none.
+            VerticalLayout {
+                alignment: center;
+
+                IconButton {
+                    glyph: Glyph.lyrics;
+                    checkable: true;
+                    active: PlayerState.now-playing-open && PlayerState.lyrics-shown && PlayerState.has-lyrics;
+                    enabled: PlayerState.has-lyrics;
+                    label: @tr("Lyrics");
+                    clicked => {
+                        if !PlayerState.now-playing-open {
+                            PlayerState.set-lyrics-shown(true);
+                            PlayerState.now-playing-open = true;
+                            PlayerState.load-large-cover();
+                        } else if PlayerState.lyrics-shown {
+                            PlayerState.now-playing-open = false;
+                        } else {
+                            PlayerState.set-lyrics-shown(true);
+                        }
+                    }
+                }
+            }
 
             VerticalLayout {
                 alignment: center;
@@ -639,6 +668,7 @@ export component PlayerBar inherits Rectangle {
                 max-width: 120px;
 
                 Slider {
+                    min-width: 52px;
                     accent-fill: false;
                     wheel: true;
                     value: PlayerState.muted ? 0 : PlayerState.volume;
