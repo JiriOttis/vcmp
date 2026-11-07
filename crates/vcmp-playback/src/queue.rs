@@ -178,6 +178,15 @@ impl Queue {
         self.origin.as_deref()
     }
 
+    /// The context's origin while its own track is current; `None` while a track
+    /// taken from Up next is, or nothing is.
+    pub fn current_origin(&self) -> Option<&str> {
+        match self.current {
+            Some(QueueSlot::Context(_)) => self.origin(),
+            _ => None,
+        }
+    }
+
     pub fn up_next(&self) -> impl ExactSizeIterator<Item = &QueueEntry> {
         self.up_next.iter()
     }

@@ -894,6 +894,7 @@ fn main() -> Result<(), slint::PlatformError> {
             player.handle_event(Event::TrackChanged(Some(NowPlaying {
                 entry: QueueEntry::new(TrackRef::local(track.path.to_string_lossy().as_ref())),
                 duration: Some(track.duration),
+                origin: None,
             })));
             player.handle_event(Event::StateChanged(PlaybackState::Playing));
             player.handle_event(Event::Position(track.duration / 3));

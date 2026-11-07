@@ -28,6 +28,10 @@ pub enum PlaybackState {
 pub struct NowPlaying {
     pub entry: QueueEntry,
     pub duration: Option<Duration>,
+    /// The app's key for the context the track plays from, as given to
+    /// [`Command::PlayContext`]; `None` for a track taken from Up next, or a context
+    /// given none.
+    pub origin: Option<String>,
 }
 
 /// The output device in use.

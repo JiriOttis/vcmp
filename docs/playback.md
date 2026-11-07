@@ -202,6 +202,11 @@ These are the agreed semantics. The pure logic is `Queue`, and the engine drives
 
 - **Context.** Playing an album, playlist or list makes it the *context*.
   - `origin` is the app's own key for it ("album:42"), handed back in `QueueView`.
+    `TrackChanged`'s `NowPlaying.origin` carries it too while the context's own
+    track plays, and `None` for a track taken from Up next
+    (`Queue::current_origin`); the app records it with each play in the play
+    history. It travels with the track change because `QueueChanged` for a new
+    context comes after it.
   - A new context clears the history.
 - **Up next.** "Play next" puts tracks at the front of Up next, and "Add to queue"
   appends them. Both come from track menus, the queue panel, and album cards' menus

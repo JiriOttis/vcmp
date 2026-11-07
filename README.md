@@ -35,6 +35,10 @@ A player for the music files on your own drives, for Windows 10 and newer and Li
 - A library check in Settings lists duplicate tracks, tracks with missing tags and
   albums without a cover, so you can play, edit or look them up. It never deletes
   anything.
+
+- Remembers what you play: how often and when each track was last played, and
+  when it came into your library, as columns you can turn on and sort by in Songs.
+  Settings can clear the history.
 - Finds missing album covers online (the Cover Art Archive, through MusicBrainz) and
   artist photos on fanart.tv. You can use your own pictures instead, and give
   playlists one too. An animated GIF, WebP or PNG plays on its album's, artist's or

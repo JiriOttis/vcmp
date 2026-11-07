@@ -196,6 +196,20 @@ fn up_next_plays_first_in_order_then_the_context_resumes() {
 }
 
 #[test]
+fn only_the_contexts_own_tracks_carry_its_origin() {
+    let mut queue = Queue::with_seed(1);
+    assert_eq!(queue.current_origin(), None, "nothing plays");
+    queue.set_context(album(2), Some("playlist:3".into()), None);
+    queue.play_next([track("x")]);
+    assert_eq!(queue.current_origin(), Some("playlist:3"));
+    queue.advance(Advance::Ended);
+    assert_eq!(name(queue.current()).as_deref(), Some("x"));
+    assert_eq!(queue.current_origin(), None, "taken from Up next");
+    queue.advance(Advance::Ended);
+    assert_eq!(queue.current_origin(), Some("playlist:3"));
+}
+
+#[test]
 fn up_next_survives_a_new_context() {
     let mut queue = Queue::with_seed(1);
     queue.set_context(album(3), None, None);

@@ -154,4 +154,6 @@ export global PlayerState {
     callback set-output-device(int);
     // Lists the devices again; the answer arrives in `output-devices`.
     callback refresh-output-devices();
+    // Deletes every play from the play history, after Settings asked.
+    callback clear-play-history();
 }

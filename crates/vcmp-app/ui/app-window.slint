@@ -3,7 +3,7 @@ import { ReduceMotion, Theme, ThemeKind, ThemePalette } from "theme.slint";
 import { NavItem, PlaylistLink, ScrollArea } from "components.slint";
 import { AboutPage, AlbumsPage, ArtistsPage, FoldersPage, PlaylistsPage, SearchPage, SettingsPage, SongsPage } from "pages.slint";
 import { FolderRow } from "folders-page.slint";
-import { SongColumn, SongRow, SongSelection } from "songs-page.slint";
+import { DayStamp, SongColumn, SongDates, SongRow, SongSelection } from "songs-page.slint";
 import { ArtistDetail } from "artist-page.slint";
 import { AlbumTile, ArtworkState } from "album-grid.slint";
 import { AlbumDetail, TrackRow, TrackSelection } from "album-page.slint";
@@ -24,7 +24,7 @@ import { SidebarUpdateNote, UpdateState } from "updates.slint";
 import { CoverPicker, CoverSearch, CoverSearchStatus } from "cover-picker.slint";
 import { PhotoPicker, PhotoSearch, PhotoSearchStatus } from "photo-picker.slint";
 import { TagChange, TagEditorState, TagEditorStatus, TagEditorView, TagFailure, TagFailureReason, TagField, TagMixed, TagProblem, TagValues } from "tag-editor.slint";
-import { ColumnWidths } from "columns.slint";
+import { ColumnWidths, SongColumns } from "columns.slint";
 import { AgentState, ChangeEntry, ChangeField, ChangeGroup, ChangeHistory, ChangeKind, ChangeProblem, ChangeReview, ChangeRow, ChangeStatus, ReviewStatus, ServerStatus, SidebarReviewNote } from "agents.slint";
 import { LabelChoice, LabelEditor, LabelEntry, LabelFilterPage, LabelProblem, Labels, PaletteColour } from "labels.slint";
 import { LabelDetail, LabelsPage } from "label-page.slint";
@@ -44,10 +44,10 @@ export { Glyph, IconArt, PlayerProblem, PlayerState, PlayState, QueueRow, QueueS
 export { CoverSearch, CoverSearchStatus, PhotoSearch, PhotoSearchStatus }
 export { CheckList, CheckTab, CheckTrack, CoverlessAlbum, DuplicateBlock, GapBlock, LibraryCheck }
 export { TagChange, TagEditorState, TagEditorStatus, TagFailure, TagFailureReason, TagField, TagMixed, TagProblem, TagValues }
-export { FolderRow, PlaylistDetail, PlaylistImport, Playlists, SongColumn, SongRow, SongSelection, UnmatchedEntry }
+export { DayStamp, FolderRow, PlaylistDetail, PlaylistImport, Playlists, SongColumn, SongDates, SongRow, SongSelection, UnmatchedEntry }
 export { SelectionChange }
 export { MovingPictures, PictureFrame, PictureSlot }
-export { ColumnWidths }
+export { ColumnWidths, SongColumns }
 export { UpdateState }
 export { TrackSelection }
 export { AlbumDetail, AlbumTile, ArtistDetail, ArtworkState, LibraryError, LibraryState, ReduceMotion, ScanPhase, SourceFolder, Theme, ThemeKind, ThemePalette, TrackRow, UnreadableFile }

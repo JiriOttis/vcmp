@@ -99,7 +99,7 @@ impl Library {
         Ok(statement
             .query_map([id.0], |row| {
                 Ok(PlaylistEntry {
-                    position: row.get(15)?,
+                    position: row.get(16)?,
                     track: track_from(row)?,
                 })
             })?

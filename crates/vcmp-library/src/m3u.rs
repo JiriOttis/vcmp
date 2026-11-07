@@ -505,6 +505,7 @@ mod tests {
             year: None,
             genre: None,
             duration: Duration::from_secs_f64(seconds),
+            added: std::time::UNIX_EPOCH,
         }
     }
 

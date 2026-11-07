@@ -3,7 +3,8 @@
 //! songs table, the folder browser, the playlists, the labels, the favourites and
 //! the Library check.
 //! All of them are reloaded after every library change, and their rows after every
-//! change of labels; a change of favourites updates the rows' hearts in place.
+//! change of labels; a change of favourites updates the rows' hearts in place, and
+//! a recorded play the songs table's plays and last played.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -12,9 +13,12 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use slint::{ComponentHandle, Image, Model, ModelRc, Timer, TimerMode, VecModel};
-use vcmp_library::{Album, AlbumId, Artist, ArtistId, Library, Playlist, Track, animation};
+use vcmp_library::{
+    Album, AlbumId, Artist, ArtistId, Library, PlayStats, Playlist, Track, TrackId, animation,
+};
 
 use crate::albums::{AlbumBrowser, Card, CoverGrid, Grid, album_initial, cards, initial};
+use crate::days;
 use crate::favourites::{self, Hearts};
 use crate::folders::FolderBrowser;
 use crate::labels::{self, LabelBrowser};
@@ -23,7 +27,7 @@ use crate::moving_pictures::{self, Picture};
 use crate::playlists::{self, PlaylistBrowser, PlaylistKey};
 use crate::{
     AlbumDetail, AlbumTile, AppWindow, ArtistDetail, LabelFilterPage, Playlists, SongColumn,
-    SongRow, TrackRow,
+    SongDates, SongRow, TrackRow,
 };
 
 pub struct LibraryView {
@@ -52,6 +56,10 @@ pub struct LibraryView {
     all_songs: RefCell<Option<Vec<Track>>>,
     songs: RefCell<Vec<Track>>,
     songs_filter_timer: Timer,
+    // Every played track's count and last play, read with `all_songs`.
+    play_stats: RefCell<HashMap<TrackId, PlayStats>>,
+    // Moves `SongDates.today` on once the day changes.
+    day_timer: Timer,
     folders: Rc<FolderBrowser>,
     playlists: Rc<PlaylistBrowser>,
     labels: Rc<LabelBrowser>,
@@ -76,6 +84,9 @@ pub const SEARCH_DELAY: Duration = Duration::from_millis(150);
 /// The most of each kind a search shows: a couple of rows of cards, and tracks.
 const SEARCH_CARDS: usize = 12;
 const SEARCH_TRACKS: usize = 50;
+/// How often the songs table's dates check whether the day changed; a minute also
+/// catches up soon after the computer slept through midnight.
+const DAY_CHECK: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
 struct OpenArtist {
@@ -131,6 +142,8 @@ impl LibraryView {
             all_songs: RefCell::default(),
             songs: RefCell::default(),
             songs_filter_timer: Timer::default(),
+            play_stats: RefCell::default(),
+            day_timer: Timer::default(),
             folders,
             playlists,
             labels,
@@ -138,6 +151,18 @@ impl LibraryView {
             check,
         });
         view.labels.set_view(Rc::downgrade(&view));
+        window.global::<SongDates>().set_today(days::today());
+        let weak_window = window.as_weak();
+        view.day_timer
+            .start(TimerMode::Repeated, DAY_CHECK, move || {
+                if let Some(window) = weak_window.upgrade() {
+                    let dates = window.global::<SongDates>();
+                    let today = days::today();
+                    if dates.get_today() != today {
+                        dates.set_today(today);
+                    }
+                }
+            });
         if let Some((column, descending)) = view
             .library
             .setting(SETTING_SONGS_SORT)
@@ -630,13 +655,58 @@ impl LibraryView {
             log::error!("could not read the tracks: {error}");
             Vec::new()
         });
+        let stats = self.library.play_stats(None).unwrap_or_else(|error| {
+            log::error!("could not read the play history: {error}");
+            HashMap::new()
+        });
         sort_songs(
             &mut tracks,
             window.get_songs_sort_column(),
             window.get_songs_sort_descending(),
+            &stats,
         );
+        *self.play_stats.borrow_mut() = stats;
         *self.all_songs.borrow_mut() = Some(tracks);
         self.show_songs();
+    }
+
+    /// A play of `track` was recorded: the songs table's rows of it show their new
+    /// plays and last played. The order catches up when the list is next built.
+    pub fn play_recorded(&self, track: TrackId) {
+        if self.all_songs.borrow().is_none() {
+            return;
+        }
+        let stats = match self.library.track_play_stats(track) {
+            Ok(Some(stats)) => stats,
+            Ok(None) => return,
+            Err(error) => {
+                log::warn!("could not read the track's plays: {error}");
+                return;
+            }
+        };
+        self.play_stats.borrow_mut().insert(track, stats);
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        let rows = window.get_songs();
+        let id = favourites::row_id(track);
+        for index in 0..rows.row_count() {
+            if let Some(mut row) = rows.row_data(index)
+                && row.track_id == id
+            {
+                row.plays = play_count(&stats);
+                row.last_played = days::stamp(Some(stats.last));
+                rows.set_row_data(index, row);
+            }
+        }
+    }
+
+    /// The play history was cleared: the songs table shows no plays.
+    pub fn play_history_cleared(&self) {
+        self.play_stats.borrow_mut().clear();
+        if self.all_songs.borrow().is_some() {
+            self.load_songs();
+        }
     }
 
     /// Shows the songs the Songs page's filter leaves.
@@ -659,6 +729,7 @@ impl LibraryView {
             })
             .cloned()
             .collect();
+        let stats = self.play_stats.borrow();
         let rows: Vec<SongRow> = tracks
             .iter()
             .map(|track| SongRow {
@@ -676,8 +747,12 @@ impl LibraryView {
                 labels: labels::chips(track.id),
                 track_id: favourites::row_id(track.id),
                 liked: favourites::liked(track.id),
+                plays: stats.get(&track.id).map_or(0, play_count),
+                last_played: days::stamp(stats.get(&track.id).map(|stats| stats.last)),
+                added: days::stamp(Some(track.added)),
             })
             .collect();
+        drop(stats);
         window.set_songs(ModelRc::new(VecModel::from(rows)));
         *self.songs.borrow_mut() = tracks;
     }
@@ -787,10 +862,21 @@ impl Filter {
     }
 }
 
+fn play_count(stats: &PlayStats) -> i32 {
+    i32::try_from(stats.count).unwrap_or(i32::MAX)
+}
+
 /// Sorts the Songs page. Missing values (untagged artist, album or year) go after
 /// the rest, and ties fall back to the album order, so an artist's songs stay in
-/// album and track order. Reversing turns the whole order around.
-fn sort_songs(tracks: &mut [Track], column: SongColumn, descending: bool) {
+/// album and track order. Reversing turns the whole order around, except for plays
+/// and last played: tracks never played follow the played ones either way, by
+/// title.
+fn sort_songs(
+    tracks: &mut [Track],
+    column: SongColumn,
+    descending: bool,
+    stats: &HashMap<TrackId, PlayStats>,
+) {
     let text = |value: &Option<String>| {
         let value = value.as_deref().unwrap_or_default();
         (value.is_empty(), value.to_lowercase())
@@ -819,6 +905,24 @@ fn sort_songs(tracks: &mut [Track], column: SongColumn, descending: bool) {
         }),
         SongColumn::Year => tracks.sort_by_cached_key(album_order),
         SongColumn::Duration => tracks.sort_by_key(|t| t.duration),
+        SongColumn::Added => tracks.sort_by_cached_key(|t| (t.added, album_order(t))),
+        SongColumn::Plays | SongColumn::LastPlayed => {
+            tracks.sort_by_cached_key(|t| (!stats.contains_key(&t.id), t.title.to_lowercase()));
+            let played = tracks
+                .iter()
+                .take_while(|t| stats.contains_key(&t.id))
+                .count();
+            let played = &mut tracks[..played];
+            if column == SongColumn::Plays {
+                played.sort_by_key(|t| (stats[&t.id].count, stats[&t.id].last));
+            } else {
+                played.sort_by_key(|t| stats[&t.id].last);
+            }
+            if descending {
+                played.reverse();
+            }
+            return;
+        }
     }
     if descending {
         tracks.reverse();
@@ -832,6 +936,9 @@ fn column_name(column: SongColumn) -> &'static str {
         SongColumn::Album => "album",
         SongColumn::Year => "year",
         SongColumn::Duration => "duration",
+        SongColumn::Plays => "plays",
+        SongColumn::LastPlayed => "last_played",
+        SongColumn::Added => "added",
     }
 }
 
@@ -846,6 +953,9 @@ fn parse_sort(value: &str) -> Option<(SongColumn, bool)> {
         "album" => SongColumn::Album,
         "year" => SongColumn::Year,
         "duration" => SongColumn::Duration,
+        "plays" => SongColumn::Plays,
+        "last_played" => SongColumn::LastPlayed,
+        "added" => SongColumn::Added,
         _ => return None,
     };
     Some((column, descending))
@@ -1097,6 +1207,7 @@ mod tests {
             year: Some(year),
             genre: None,
             duration: Duration::from_secs(seconds),
+            added: std::time::UNIX_EPOCH,
         }
     }
 
@@ -1109,30 +1220,79 @@ mod tests {
         ];
         let titles =
             |tracks: &[Track]| -> Vec<String> { tracks.iter().map(|t| t.title.clone()).collect() };
-        sort_songs(&mut tracks, SongColumn::Title, false);
+        sort_songs(&mut tracks, SongColumn::Title, false, &HashMap::new());
         assert_eq!(titles(&tracks), ["A", "b", "c"], "ignoring case");
-        sort_songs(&mut tracks, SongColumn::Artist, false);
+        sort_songs(&mut tracks, SongColumn::Artist, false, &HashMap::new());
         assert_eq!(titles(&tracks), ["A", "c", "b"]);
-        sort_songs(&mut tracks, SongColumn::Year, true);
+        sort_songs(&mut tracks, SongColumn::Year, true, &HashMap::new());
         assert_eq!(titles(&tracks), ["c", "b", "A"]);
-        sort_songs(&mut tracks, SongColumn::Duration, false);
+        sort_songs(&mut tracks, SongColumn::Duration, false, &HashMap::new());
         assert_eq!(titles(&tracks), ["A", "c", "b"]);
 
         let mut untagged = track("0 untagged", "", 0, 10);
         untagged.artist = None;
         untagged.year = None;
         tracks.push(untagged);
-        sort_songs(&mut tracks, SongColumn::Artist, false);
+        sort_songs(&mut tracks, SongColumn::Artist, false, &HashMap::new());
         assert_eq!(
             titles(&tracks).last().unwrap(),
             "0 untagged",
             "unknown artists last"
         );
-        sort_songs(&mut tracks, SongColumn::Year, false);
+        sort_songs(&mut tracks, SongColumn::Year, false, &HashMap::new());
         assert_eq!(
             titles(&tracks).last().unwrap(),
             "0 untagged",
             "unknown years last"
+        );
+    }
+
+    #[test]
+    fn never_played_songs_follow_the_played_ones_either_way() {
+        let at = |seconds| std::time::UNIX_EPOCH + Duration::from_secs(seconds);
+        let mut tracks: Vec<Track> = ["b never", "often", "once", "a never", "twice"]
+            .into_iter()
+            .enumerate()
+            .map(|(id, title)| Track {
+                id: TrackId(id as i64),
+                added: at(100 - id as u64),
+                ..track(title, "Band", 2000, 100)
+            })
+            .collect();
+        let stats: HashMap<TrackId, PlayStats> = [(1, 5, 300), (2, 1, 900), (4, 2, 100)]
+            .into_iter()
+            .map(|(id, count, last)| {
+                (
+                    TrackId(id),
+                    PlayStats {
+                        count,
+                        last: at(last),
+                    },
+                )
+            })
+            .collect();
+        let titles =
+            |tracks: &[Track]| -> Vec<String> { tracks.iter().map(|t| t.title.clone()).collect() };
+
+        sort_songs(&mut tracks, SongColumn::Plays, false, &stats);
+        assert_eq!(
+            titles(&tracks),
+            ["once", "twice", "often", "a never", "b never"]
+        );
+        sort_songs(&mut tracks, SongColumn::Plays, true, &stats);
+        assert_eq!(
+            titles(&tracks),
+            ["often", "twice", "once", "a never", "b never"]
+        );
+        sort_songs(&mut tracks, SongColumn::LastPlayed, true, &stats);
+        assert_eq!(
+            titles(&tracks),
+            ["once", "often", "twice", "a never", "b never"]
+        );
+        sort_songs(&mut tracks, SongColumn::Added, false, &stats);
+        assert_eq!(
+            titles(&tracks),
+            ["twice", "a never", "once", "often", "b never"]
         );
     }
 
@@ -1153,6 +1313,9 @@ mod tests {
             SongColumn::Album,
             SongColumn::Year,
             SongColumn::Duration,
+            SongColumn::Plays,
+            SongColumn::LastPlayed,
+            SongColumn::Added,
         ] {
             for descending in [false, true] {
                 let value = format!(

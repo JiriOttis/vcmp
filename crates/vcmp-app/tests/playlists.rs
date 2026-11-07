@@ -595,6 +595,7 @@ fn queued_and_playing_tracks_can_be_added_to_a_playlist() {
         .handle_event(Event::TrackChanged(Some(NowPlaying {
             entry: entry("1.flac"),
             duration: None,
+            origin: None,
         })));
     state.set_now_playing_open(true);
     mock_elapsed_time(Duration::ZERO);

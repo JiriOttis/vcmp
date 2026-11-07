@@ -31,12 +31,13 @@ DESIGN.md).
 | `ui/playlist-import.slint` | `PlaylistImport` global, `UnmatchedEntry` and `PlaylistImportReport`: the dialog saying what an import of an M3U file left out |
 | `src/playlists.rs` | `PlaylistBrowser`: the playlist grid and page, the sidebar list, and the edits behind them |
 | `ui/artist-page.slint` | `ArtistView`: one artist's picture, albums and appearances |
-| `ui/songs-page.slint` | `SongTable`: every track with sortable columns, only the rows in view created |
+| `ui/songs-page.slint` | `SongTable`: every track with sortable columns that the header menu shows and hides, only the rows in view created; `SongDates`, the Last played and Added texts |
+| `src/days.rs` | Local calendar days (`DayStamp`) for the songs table's Last played and Added columns |
 | `ui/folders-page.slint` | `FolderBrowser`: the path back up, the folders and the files of one folder |
 | `src/folders.rs` | `FolderBrowser`: the folder tree built from the library's tracks |
 | `ui/album-page.slint` | `AlbumView`: one album's cover, details and tracks by disc; `TrackList`, the track list every page shares, and its `TrackSelection` global |
 | `ui/selection.slint` | `SelectionChange`: how a track list's selection changes |
-| `ui/columns.slint` | `ColumnWidths` global (the saved column shares) and `ColumnEdge`, the resizable edge between two column headings |
+| `ui/columns.slint` | `ColumnWidths` global (the saved column shares), `SongColumns` (the songs table's columns that show) and `ColumnEdge`, the resizable edge between two column headings |
 | `src/selection.rs` | Applies selection changes to a list's rows, and picks the rows a menu acts on |
 | `ui/cover-picker.slint` | `CoverSearch` global and `CoverPicker`: "Find cover online" and the covers to pick from, for the album page's album or any album by id (`find-album`) |
 | `src/cover_fetch.rs` | `CoverFetch`: runs the cover search, stores the picked cover and shows it everywhere |
@@ -632,6 +633,13 @@ table can select several tracks for the track menu.
   the library's settings when a drag or key press ends (`ui.track_columns`,
   `ui.song_columns`, numbers separated by spaces) and read at start
   (`src/preferences.rs`); anything else saved there is ignored.
+- **Hiding (songs table only):** a right click on the headings, or the Menu key
+  while one has the focus, opens a menu of checkable columns (`SongColumns`,
+  `ui/columns.slint`): every column but Title. A hidden text column keeps its share
+  for when it comes back; the edge after Title moves to the next text column shown,
+  and the one between Artist and Album shows only while both do. The columns shown
+  are saved by name (`ui.song_columns_shown`, e.g. `artist album year duration`);
+  without that setting all show but Plays, Last played and Added.
 
 ## Search
 
@@ -712,11 +720,14 @@ field (see [Labels](#labels)).
 ## Songs page
 
 - **The table** (`SongTable`) lists every available track: Title, Artist, Album,
-  Year and Time. Like the album grid, it only creates the rows in view (a test
-  checks that 5,000 songs create fewer than 60 rows).
+  Year and Time, and on request Plays, Last played and Added (see
+  [Play history](#play-history)). Like the album grid, it only creates the rows in
+  view (a test checks that 5,000 songs create fewer than 60 rows).
 - **Sorting:** a header sorts by its column; the same header again reverses the
   order. Ties keep album and track order, and missing artists, albums and years
-  go last. The order is saved (`ui.songs_sort`), and starts by artist.
+  go last. Tracks never played follow the played ones in both directions of Plays
+  and Last played, by title. The order is saved (`ui.songs_sort`), and starts by
+  artist; hiding the column it follows goes back to Title.
 - **Loading:** the tracks are read the first time the page is shown, not at
   startup, and again after library changes once they were loaded.
 - **Keyboard:** the headers are buttons; the rows are one tab stop with Up/Down,
@@ -726,9 +737,18 @@ field (see [Labels](#labels)).
 - **Playing:** a row's play button, a double-click or Enter plays every song in the
   table's order from that one; the queue panel says "Next from all songs".
 - **Columns:** the edges between the Title, Artist and Album headings resize those
-  columns (see [Table columns](#table-columns)); Year and Time keep their widths.
-  While labels exist, a Labels column of 140 px before Year shows a track's first
-  label and how many more it has.
+  columns (see [Table columns](#table-columns)); Year, Time, Plays (56 px), Last
+  played and Added (104 px each) keep their widths. While labels exist, a Labels
+  column of 140 px before Year shows a track's first label and how many more it
+  has. The header menu shows and hides every column but Title.
+- **Play history columns:** Plays is the track's count (0 when never played). Last
+  played and Added read "Today", "Yesterday", "2 days ago" to "6 days ago", then a
+  date such as "7 Nov 2026" (empty for a track never played). The rows carry the
+  local day and its date (`DayStamp`, from `src/days.rs`) and `SongDates` turns
+  them into text through `@tr()` against `SongDates.today`, which a one-minute
+  timer moves on after midnight (also soon after the computer wakes). A play that
+  counts updates its rows in place; the order follows on the next sort, filter or
+  library change.
 
 ## Folders page
 
@@ -969,7 +989,8 @@ The Albums page tells apart why it is empty:
     the steps between the engine's positions while playing, so pauses and the part
     a seek jumps over add nothing (a step back, or of more than 2 s, is a jump). A
     repeated track is a new play; going back within a play does not scrobble it
-    twice. Tracks without an artist tag are not scrobbled.
+    twice. Tracks without an artist tag are not scrobbled, but count for the play
+    history (see [Play history](#play-history)).
   - Counted plays wait in the library's `scrobble_queue` and go out in batches of
     up to 50, so they survive a restart or a day offline. After a failure the
     scrobbler waits 30 s, then twice as long each time up to 30 minutes; a "now
@@ -1261,6 +1282,29 @@ sidebar's Settings entry shows Settings.
   (`vcmp_integrations::file_manager::reveal`: Explorer `/select` on Windows,
   `open -R` on macOS, the `FileManager1` D-Bus call on Linux, the folder where no
   file manager answers). The page never writes, moves or removes a file itself.
+
+## Play history
+
+The agreed decisions are in the
+[play history spec](specs/2026-11-07-play-history.md); storage is in
+[library.md](library.md#play-history).
+
+- **What counts:** the Last.fm rule above, followed by `PlayerService` for every
+  library track (one with a track id), artist tag or not, whether Last.fm is
+  connected, disconnected or not built in. Files outside the library are never
+  recorded. A play is recorded once, when the rule is met, with the moment it
+  started; Last.fm then gets it too if the track has an artist. Each pass of
+  Repeat One is its own play; Previous late in a track is a seek and stays the
+  same play. The player bar's Last.fm mark is about Last.fm only.
+- **Origin:** the engine's `NowPlaying.origin`, the key the app gave the context
+  (`album:12`, `search`, ...), or none for a track taken from Up next.
+- **Writing** is one insert on the UI thread per counted play; a failure is logged
+  and the play is lost, never playback.
+- **Showing:** the Songs page's Plays, Last played and Added columns, hidden until
+  turned on from the header menu (see [Songs page](#songs-page)).
+- **Clearing:** Settings, Playback, "Clear play history..." asks first
+  (`Confirmation`) and then deletes every play; the scrobbles waiting for Last.fm
+  and the added dates stay.
 
 ## Menus over lists
 

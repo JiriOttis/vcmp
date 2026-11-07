@@ -372,6 +372,22 @@ CREATE TABLE not_duplicates (
 
 CREATE INDEX not_duplicates_track ON not_duplicates(track_id);
 "#,
+    r#"
+-- Play history: one row per play that counted (the Last.fm rule), with when it
+-- started (Unix time) and the app's key for the context it played from ("album:12",
+-- "playlist:3", "search", ...), or NULL for a track from Up next or no context. Plays
+-- point at tracks, which are never deleted, so they follow a moved file. Counts and
+-- last played are worked out from here; nothing is cached on tracks.
+CREATE TABLE plays (
+    id INTEGER PRIMARY KEY,
+    track_id INTEGER NOT NULL REFERENCES tracks(id),
+    played_ms INTEGER NOT NULL,
+    origin TEXT
+) STRICT;
+
+CREATE INDEX plays_track ON plays(track_id, played_ms);
+CREATE INDEX plays_time ON plays(played_ms);
+"#,
 ];
 
 pub(crate) const VERSION: i64 = MIGRATIONS.len() as i64;

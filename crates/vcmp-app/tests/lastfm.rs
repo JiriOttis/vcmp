@@ -382,6 +382,7 @@ fn play(app: &App, player: &PlayerService, length: Duration) {
     player.handle_event(Event::TrackChanged(Some(NowPlaying {
         entry: QueueEntry::new(TrackRef::local(path)),
         duration: Some(length),
+        origin: None,
     })));
     player.handle_event(Event::StateChanged(PlaybackState::Playing));
 }

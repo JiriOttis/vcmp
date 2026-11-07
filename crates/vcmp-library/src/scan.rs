@@ -70,6 +70,19 @@ struct Found {
     source_id: i64,
     size: i64,
     modified_ms: i64,
+    /// Where the file system keeps a creation time.
+    created_ms: Option<i64>,
+}
+
+impl Found {
+    /// The earliest date the file carries: its creation or its modification time.
+    fn earliest_ms(&self) -> Option<i64> {
+        [Some(self.modified_ms), self.created_ms]
+            .into_iter()
+            .flatten()
+            .filter(|ms| *ms > 0)
+            .min()
+    }
 }
 
 struct ReadJob<'a> {
@@ -117,6 +130,7 @@ pub(crate) fn scan(
 
     let mut to_read = Vec::new();
     let tx = conn.transaction()?;
+    backfill_added_dates(&tx, &found, &known)?;
     for file in found.values() {
         match known.get(&path_codec::encode(&file.path)) {
             Some(row) if row.size == file.size && row.modified_ms == file.modified_ms => {
@@ -242,6 +256,42 @@ pub(crate) fn scan(
     Ok(report)
 }
 
+/// Once, on the first scan after play history arrived: the tracks already in the
+/// library, which all carry the time of the scan that first found them, take the
+/// earliest date their file carries instead. Only rows from before this scan are
+/// touched (`known`), a date only ever moves earlier, and a track whose file this
+/// scan doesn't find keeps its date for good. SQL can't read file dates, so this
+/// happens here and not in the migration.
+fn backfill_added_dates(
+    tx: &Transaction,
+    found: &HashMap<Vec<u8>, Found>,
+    known: &HashMap<Vec<u8>, Known>,
+) -> Result<()> {
+    let done: Option<String> = tx
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [crate::SETTING_ADDED_BACKFILLED],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if done.is_some() {
+        return Ok(());
+    }
+    let mut update =
+        tx.prepare("UPDATE tracks SET added_ms = ?2 WHERE id = ?1 AND added_ms > ?2")?;
+    for (key, row) in known {
+        if let Some(earliest) = found.get(key).and_then(Found::earliest_ms) {
+            update.execute([row.id, earliest])?;
+        }
+    }
+    tx.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, 'true')
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        [crate::SETTING_ADDED_BACKFILLED],
+    )?;
+    Ok(())
+}
+
 /// Sends the albums of every folder whose cover images were added, replaced or
 /// removed since the last scan back to the artwork pass, and records what each
 /// folder holds now. A folder seen for the first time is only recorded: its albums
@@ -345,6 +395,7 @@ pub(crate) fn reread_edited(
             source_id,
             size: metadata.len() as i64,
             modified_ms: metadata.modified().map(millis).unwrap_or(0),
+            created_ms: metadata.created().map(millis).ok(),
         };
         read.push((id, edit, file, track, old_album));
     }
@@ -478,6 +529,7 @@ fn discover(
                 source_id,
                 size: metadata.len() as i64,
                 modified_ms: metadata.modified().map(millis).unwrap_or(0),
+                created_ms: metadata.created().map(millis).ok(),
             });
             if found.len().is_multiple_of(500) {
                 progress(ScanProgress {

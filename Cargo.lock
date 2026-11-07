@@ -6585,6 +6585,7 @@ dependencies = [
 name = "vcmp-app"
 version = "26.10.2"
 dependencies = [
+ "chrono",
  "directories",
  "dunce",
  "embed-resource",
@@ -6596,6 +6597,7 @@ dependencies = [
  "png",
  "raw-window-handle",
  "rfd",
+ "rusqlite",
  "serde",
  "serde_json",
  "slint",

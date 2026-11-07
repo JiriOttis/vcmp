@@ -28,8 +28,9 @@ instead, because nothing could rebuild them. The database runs in
 WAL mode, so one connection can scan while others read. Open one `Library` per
 thread.
 
-Labels (see [Labels](#labels)) and favourites (see [Favourites](#favourites)) live in
-the database only and never touch a file.
+Labels (see [Labels](#labels)), favourites (see [Favourites](#favourites)) and the
+play history (see [Play history](#play-history)) live in the database only and never
+touch a file.
 
 Music files are only read, except by `Library::write_tags`, the tag editor's write
 path (see [Writing tags](#writing-tags)), and `Library::accept_change_set` (see
@@ -37,7 +38,7 @@ path (see [Writing tags](#writing-tags)), and `Library::accept_change_set` (see
 
 ## Schema
 
-Version 14, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
+Version 15, applied by `src/schema.rs`. `PRAGMA user_version` counts the applied
 migrations; a database from a newer build is refused instead of being altered.
 Migrations run with foreign keys off (`Library::open` turns them on afterwards), so
 a migration that rebuilds a table, as version 12 rebuilds `change_sets` to widen
@@ -45,9 +46,9 @@ the CHECK on its kind, doesn't delete the rows that refer to it.
 
 | Table | Holds |
 |---|---|
-| `settings` | Key/value preferences: `library.auto_update`, `ui.theme` (the theme and accent as JSON; [ui.md](ui.md#themes)), `ui.reduced_motion` (`system`, `on` or `off`), `ui.setup_done` (the setup wizard was shown, or the library had folders when it came; [ui.md](ui.md#setup-wizard)) |
+| `settings` | Key/value preferences: `library.auto_update`, `library.added_backfilled` (the one-time backfill of added dates ran; see [Play history](#play-history)), `ui.theme` (the theme and accent as JSON; [ui.md](ui.md#themes)), `ui.reduced_motion` (`system`, `on` or `off`), `ui.setup_done` (the setup wizard was shown, or the library had folders when it came; [ui.md](ui.md#setup-wizard)) |
 | `source_dirs` | Source directories (canonical path) and their `recursive` flag |
-| `tracks` | One row per file ever seen: path, size, mtime, `available`, format, tags, duration |
+| `tracks` | One row per file ever seen: path, size, mtime, `available`, format, tags, duration, and `added_ms`, when VCMP first saw it (see [Play history](#play-history)) |
 | `albums` | Album groups, their artist, year and artwork state, and whether the album is an artist's Unknown album (`unknown`, version 9) |
 | `artists` | Artist names (unique, case-insensitive) and MusicBrainz artist ID |
 | `cover_lookups` | What the online cover lookup found for an album (a release or release-group MBID, or nothing) and when, keyed by the album's group key so it survives rescans (version 2) |
@@ -68,6 +69,7 @@ the CHECK on its kind, doesn't delete the rows that refer to it.
 | `change_labels` | The labels a label set creates when accepted, and whether it did or found one of that name (version 12) |
 | `favourites` | The tracks the owner liked, one row each, and when (version 13; see [Favourites](#favourites)) |
 | `not_duplicates` | Duplicate groups the owner marked "Not duplicates": one row per track, with a group id shared by the tracks marked together (version 14; see [Library check](#library-check)) |
+| `plays` | Every play that counted: track, when it started and the origin of the context it played from, indexed by track and time and by time (version 15; see [Play history](#play-history)) |
 
 Paths are stored as platform-native bytes (`src/path_codec.rs`), so file names that
 aren't valid UTF-8 keep working.
@@ -84,6 +86,9 @@ aren't valid UTF-8 keep working.
    - A changed file is re-read.
    - A file the database has but the disk doesn't is marked unavailable. Rows are
      never deleted, so playlists keep their entries.
+   - Once, on the first scan after schema version 15, the same transaction backfills
+     the added dates of the rows that existed before it (see
+     [Play history](#play-history)).
 3. **Read** new and changed files in path order on one reader thread, which runs
    ahead of the database writes (`write_as_received`: at most 200 files to a
    transaction).
@@ -627,6 +632,38 @@ missing tags and albums without a cover. The agreed decisions are in the
   (`artwork_state = 2`), and that have no fetched cover. Albums a scan hasn't looked
   at yet are left out until one has.
 
+## Play history
+
+`src/plays.rs`. Every play that counted, kept in the database only. The agreed
+decisions are in the [play history spec](specs/2026-11-07-play-history.md).
+
+- **A log, not counters.** `plays` holds one row per play: the track id, when the
+  play started (Unix ms) and the origin of its context as the app named it
+  (`album:12`, `playlist:3`, `label:5`, `folder:<path>`, `search`, `songs`,
+  `favourites`), or NULL for a track from Up next. The origin is kept as text, so a
+  new kind of context needs no migration, and an id in it may no longer exist (a
+  deleted playlist). Counts and last played are worked out through the
+  `(track_id, played_ms)` index; nothing is cached on `tracks`.
+- **What counts** is decided by the app (Last.fm's rule, for every library track;
+  [ui.md](ui.md#play-history)). `Library::record_play` writes one row.
+- **Plays outlive files**, like playlist entries and favourites: they stay with a
+  track whose file is gone and follow a re-linked file.
+- **Reads:** `play_stats` (every played track's count and last play, over all time
+  or since a moment, for ranges such as "last month"), `track_play_stats` (one
+  track).
+- **Clearing** (`clear_play_history`) deletes every play and nothing else: the
+  scrobbles waiting for Last.fm, the added dates and the favourites stay.
+- **Added dates.** `tracks.added_ms` is set when the scanner first inserts a row.
+  Before play history every track of a library's first scan shared that scan's
+  time, so the first scan after migration 15 backfills the rows that existed
+  before it, once: each takes the earliest of its current value, its file's
+  modification time and, where the file system keeps one, its creation time. A date
+  only ever moves earlier, rows first seen in that same scan keep "now", and a row
+  whose file that scan doesn't find keeps its date. The scan records
+  `library.added_backfilled` in the same transaction, so it never runs again. SQL
+  can't read file dates, which is why this is in the scanner and not the migration.
+  `Track::added` exposes the date.
+
 ## Measured
 
 The library used below has 3,621 tracks, 127 GB, mostly FLAC, on an NTFS hard disk
@@ -681,6 +718,11 @@ cargo run --release -p vcmp-library --example scan_profile -- /path/to/music
 
 ## Known limits
 
+- Added dates of tracks already in the library before play history come from their
+  files: a library copied from elsewhere, or files VCMP or another program edited
+  (a tag write replaces the file), get the copy's or the edit's date. A track whose
+  file was missing at that first scan keeps its first-scan date, and with
+  "Update automatically" off the backfill waits for the next rescan.
 - CUE sheets aren't read: an album ripped as one file plus a `.cue` shows up as a
   single long track.
 - A folder image is noticed by its name, size and modification time. An image

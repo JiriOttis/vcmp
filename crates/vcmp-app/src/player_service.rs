@@ -5,7 +5,8 @@
 //! next and what follows. The playing track also goes to the Discord presence, with
 //! a cover looked up on MusicBrainz for albums whose files carry no release ID,
 //! and to the OS media controls, whose media keys and widget drive the player.
-//! Plays go to Last.fm once they count by its rules, and so does the track playing.
+//! A play of a library track that counts by Last.fm's rules goes into the play
+//! history; Last.fm gets it too when the track has an artist, and the track playing.
 //! The file the engine has open is passed on, so tag edits to it can wait for it.
 //! The sleep timer counts down here and then has the engine stop after the track
 //! playing at that moment. AI agents control playback through `agent_playback`.
@@ -23,7 +24,8 @@ use slint::{
     TimerMode, VecModel,
 };
 use vcmp_library::{
-    Album, AlbumId, ArtistId, Artwork, CoverArtId, CoverLookup, LabelId, Library, PlaylistId, Track,
+    Album, AlbumId, ArtistId, Artwork, CoverArtId, CoverLookup, LabelId, Library, PlaylistId,
+    Track, TrackId,
 };
 use vcmp_playback::{
     Command, Event, NowPlaying, PlaybackError, PlaybackSnapshot, PlaybackState, Player, QueueEntry,
@@ -203,10 +205,11 @@ pub struct PlayerService {
     queue_covers: RefCell<HashMap<AlbumId, Option<Image>>>,
     queue_covers_pending: RefCell<HashSet<AlbumId>>,
     queue_cover_jobs: RefCell<Option<mpsc::Sender<(AlbumId, PathBuf)>>>,
-    // Last.fm: where plays go, the playing track's play as Last.fm counts it, and
-    // whether "now playing" went out since the track last started or resumed.
+    // Last.fm: where plays go, the playing track's play as Last.fm counts it (for the
+    // play history too), and whether "now playing" went out since the track last
+    // started or resumed.
     scrobbles: RefCell<Option<Box<dyn ScrobbleSink>>>,
-    play: RefCell<Option<(lastfm::Track, Play)>>,
+    play: RefCell<Option<CurrentPlay>>,
     announced: Cell<bool>,
     // The file the engine has open (`Event::Decoding`), and who is told when it changes.
     open_file: RefCell<Option<PathBuf>>,
@@ -225,6 +228,16 @@ pub struct PlayerService {
 
 /// Told the file the engine has open, or `None`.
 type OpenFileListener = Box<dyn Fn(Option<&Path>)>;
+
+/// The playing library track's play, from its start until the next track starts.
+struct CurrentPlay {
+    track: TrackId,
+    /// The context it plays from, as the engine named it; `None` from Up next.
+    origin: Option<String>,
+    /// What Last.fm is told, for a track with an artist.
+    scrobble: Option<lastfm::Track>,
+    play: Play,
+}
 
 /// Pixels the queue panel's covers are decoded at: 40 px rows at up to 2.4 times.
 const QUEUE_COVER_PIXELS: u32 = 96;
@@ -472,6 +485,7 @@ impl PlayerService {
             }
         });
         state.on_refresh_output_devices(with(|service| service.refresh_output_devices()));
+        state.on_clear_play_history(with(|service| service.clear_play_history()));
         state.on_load_large_cover(with(|service| service.load_large_cover()));
         state.on_go_to_album(with(|service| {
             if let Some(album) = service.album.get() {
@@ -1518,6 +1532,7 @@ impl PlayerService {
         let path = now
             .as_ref()
             .map(|now| PathBuf::from(now.entry.track.id.as_ref()));
+        let origin = now.as_ref().and_then(|now| now.origin.clone());
         // A tags notice comes as the engine moves on to the next track, and stays while
         // that one plays.
         let tags_notice_over = state.get_problem() == PlayerProblem::TagsNotWritten
@@ -1541,7 +1556,7 @@ impl PlayerService {
             self.artist.set(None);
             state.set_has_album_link(false);
             state.set_has_artist_link(false);
-            self.start_play(None, Duration::ZERO);
+            self.start_play(None, Duration::ZERO, None);
             self.update_presence();
             return;
         };
@@ -1604,7 +1619,7 @@ impl PlayerService {
         state.set_has_album_link(album.is_some());
         state.set_has_artist_link(self.artist.get().is_some());
         self.position.set(Duration::ZERO);
-        self.start_play(track.as_ref(), duration);
+        self.start_play(track.as_ref(), duration, origin);
         self.update_presence();
 
         state.set_lossless_format(lossless_format(track.as_ref()).into());
@@ -1694,22 +1709,30 @@ impl PlayerService {
         );
     }
 
-    /// A new play for Last.fm: of `track`, which is `duration` long, or of nothing.
-    /// Tracks without an artist can't be scrobbled.
-    fn start_play(&self, track: Option<&Track>, duration: Duration) {
+    /// A new play: of the library track `track`, which is `duration` long and plays
+    /// from the context `origin`, or of nothing. Every library track's play counts for
+    /// the play history; only tracks with an artist can be scrobbled.
+    fn start_play(&self, track: Option<&Track>, duration: Duration, origin: Option<String>) {
         let duration = (!duration.is_zero()).then_some(duration);
-        *self.play.borrow_mut() = track.and_then(|track| {
-            let track = lastfm::Track {
-                artist: track.artist.clone()?,
+        *self.play.borrow_mut() = track.map(|track| CurrentPlay {
+            track: track.id,
+            origin,
+            scrobble: track.artist.clone().map(|artist| lastfm::Track {
+                artist,
                 title: track.title.clone(),
                 album: track.album.clone(),
                 album_artist: track.album_artist.clone(),
                 track_number: track.track_number,
                 duration,
-            };
-            Some((track, Play::new(duration)))
+            }),
+            play: Play::new(duration),
         });
-        let eligible = self.play.borrow().is_some() && lastfm::scrobble_point(duration).is_some();
+        let eligible = self
+            .play
+            .borrow()
+            .as_ref()
+            .is_some_and(|play| play.scrobble.is_some())
+            && lastfm::scrobble_point(duration).is_some();
         self.show_scrobble(if eligible {
             ScrobbleMark::Counting
         } else {
@@ -1726,31 +1749,61 @@ impl PlayerService {
         }
         let scrobbles = self.scrobbles.borrow();
         let play = self.play.borrow();
-        if let (Some(sink), Some((track, _))) = (scrobbles.as_ref(), play.as_ref()) {
+        let track = play.as_ref().and_then(|play| play.scrobble.as_ref());
+        if let (Some(sink), Some(track)) = (scrobbles.as_ref(), track) {
             self.announced.set(true);
             sink.now_playing(track.clone());
         }
     }
 
-    /// Follows the play through the engine's positions, and hands it to Last.fm
-    /// once it counts.
+    /// Follows the play through the engine's positions; once it counts, records it
+    /// in the play history and hands it to Last.fm.
     fn count_play(&self, position: Duration) {
-        let play = {
+        let (track, origin, started, scrobble) = {
             let mut current = self.play.borrow_mut();
-            let Some((track, play)) = current.as_mut() else {
+            let Some(current) = current.as_mut() else {
                 return;
             };
-            if !play.position(position, self.playing.get(), SystemTime::now()) {
+            if !current
+                .play
+                .position(position, self.playing.get(), SystemTime::now())
+            {
                 return;
             }
-            lastfm::Scrobble {
-                track: track.clone(),
-                started: play.started().unwrap_or_else(SystemTime::now),
-            }
+            (
+                current.track,
+                current.origin.clone(),
+                current.play.started().unwrap_or_else(SystemTime::now),
+                current.scrobble.clone(),
+            )
+        };
+        self.record_play(track, started, origin.as_deref());
+        let Some(scrobble) = scrobble else {
+            return;
         };
         self.show_scrobble(ScrobbleMark::Scrobbled);
         if let Some(sink) = self.scrobbles.borrow().as_ref() {
-            sink.scrobble(play);
+            sink.scrobble(lastfm::Scrobble {
+                track: scrobble,
+                started,
+            });
+        }
+    }
+
+    /// Writes a play that counted into the play history; the Songs page shows it.
+    /// A play that can't be written is lost, never playback.
+    fn record_play(&self, track: TrackId, started: SystemTime, origin: Option<&str>) {
+        match self.library.record_play(track, started, origin) {
+            Ok(()) => self.view.play_recorded(track),
+            Err(error) => log::warn!("could not record the play: {error}"),
+        }
+    }
+
+    /// Empties the play history, as asked in Settings.
+    fn clear_play_history(&self) {
+        match self.library.clear_play_history() {
+            Ok(_) => self.view.play_history_cleared(),
+            Err(error) => log::error!("could not clear the play history: {error}"),
         }
     }
 
@@ -1900,8 +1953,8 @@ impl PlayerService {
     /// Seeks, and shows the new position at once instead of waiting for the engine.
     fn seek(&self, position: Duration) {
         self.player.send(Command::Seek(position));
-        if let Some((_, play)) = self.play.borrow_mut().as_mut() {
-            play.jumped();
+        if let Some(current) = self.play.borrow_mut().as_mut() {
+            current.play.jumped();
         }
         self.seek_target.set(Some((position, Instant::now())));
         if let Some(window) = self.window.upgrade() {
