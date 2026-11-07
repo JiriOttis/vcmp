@@ -1,6 +1,6 @@
 # M4A and AIFF formats
 
-Status: draft
+Status: agreed
 Date: 2026-11-07
 Area: vcmp-library (formats, scan, tag reading and writing, other tags), vcmp-playback
 (decoders, gapless), vcmp-app (lossless mark), vcmp-mcp (tag key descriptions)
