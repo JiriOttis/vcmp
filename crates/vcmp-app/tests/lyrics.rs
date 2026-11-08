@@ -311,6 +311,24 @@ fn the_lyrics_button_opens_now_playing_on_the_lyrics_and_is_remembered() {
 }
 
 #[test]
+fn the_lyrics_take_the_reading_width_of_a_wide_window() {
+    let app = start(|_| {});
+    app.window
+        .window()
+        .set_size(slint::LogicalSize::new(1600.0, 900.0));
+    app.play("1.flac", synced());
+    app.button("Lyrics").invoke_accessible_default_action();
+    let list = ElementHandle::find_by_accessible_label(&app.window, "Lyrics")
+        .find(|element| element.accessible_role() == Some(AccessibleRole::List))
+        .expect("the lyrics list");
+    let width = list.size().width;
+    assert!(
+        (700.0..=720.0).contains(&width),
+        "the list is {width} px wide, not the reading width"
+    );
+}
+
+#[test]
 fn lrclib_is_asked_only_with_the_switch_on_and_nothing_synced_on_disk() {
     let app = start(|_| {});
     app.play("1.flac", plain());

@@ -357,15 +357,11 @@ export component NowPlayingView inherits Rectangle {
 
                 // Clicks between the lines keep the view open.
                 TouchArea { }
-                HorizontalLayout {
-                    width: parent.width;
+                // Sized here: a centring layout would give it only its minimum width.
+                LyricsView {
+                    width: min(parent.width, Theme.content-max-width);
                     height: parent.height;
-                    alignment: center;
-
-                    LyricsView {
-                        max-width: Theme.content-max-width;
-                        horizontal-stretch: 1;
-                    }
+                    x: (parent.width - self.width) / 2;
                 }
             }
         }
