@@ -6583,7 +6583,7 @@ dependencies = [
 
 [[package]]
 name = "vcmp-app"
-version = "26.10.2"
+version = "26.11.0"
 dependencies = [
  "chrono",
  "directories",
@@ -6613,7 +6613,7 @@ dependencies = [
 
 [[package]]
 name = "vcmp-integrations"
-version = "26.10.2"
+version = "26.11.0"
 dependencies = [
  "block2 0.6.2",
  "discord-rich-presence",
@@ -6635,7 +6635,7 @@ dependencies = [
 
 [[package]]
 name = "vcmp-library"
-version = "26.10.2"
+version = "26.11.0"
 dependencies = [
  "blake3",
  "dunce",
@@ -6654,7 +6654,7 @@ dependencies = [
 
 [[package]]
 name = "vcmp-mcp"
-version = "26.10.2"
+version = "26.11.0"
 dependencies = [
  "axum",
  "dunce",
@@ -6675,7 +6675,7 @@ dependencies = [
 
 [[package]]
 name = "vcmp-playback"
-version = "26.10.2"
+version = "26.11.0"
 dependencies = [
  "cpal",
  "fastrand",
